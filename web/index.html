@@ -1,0 +1,442 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NX Uploader</title>
+<style>
+:root{
+  --bg:#0b0e13;
+  --panel:#131820;
+  --panel2:#1a212b;
+  --border:#293342;
+  --text:#e8edf3;
+  --muted:#8995a5;
+  --accent:#e60012;
+  --accent2:#ff3948;
+  --green:#35d07f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  background:radial-gradient(circle at top,#1a2029 0,#0b0e13 55%);
+  color:var(--text);
+  font-family:system-ui,"Segoe UI",Roboto,sans-serif;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  padding:24px;
+}
+.wrap{
+  width:100%;
+  max-width:680px;
+}
+.header{
+  text-align:center;
+  margin-bottom:22px;
+}
+.logo{
+  width:58px;
+  height:58px;
+  margin:0 auto 12px;
+  border-radius:16px;
+  background:linear-gradient(145deg,var(--accent2),var(--accent));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:28px;
+  font-weight:800;
+  box-shadow:0 10px 35px rgba(230,0,18,.25);
+}
+h1{
+  margin:0;
+  font-size:28px;
+  letter-spacing:-.5px;
+}
+.subtitle{
+  color:var(--muted);
+  margin-top:6px;
+  font-size:14px;
+}
+.card{
+  background:rgba(19,24,32,.94);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:22px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);
+}
+.drop{
+  border:2px dashed #354152;
+  border-radius:14px;
+  padding:34px 20px;
+  text-align:center;
+  cursor:pointer;
+  transition:.18s ease;
+  background:rgba(255,255,255,.015);
+  display:block;
+}
+.drop:hover,.drop.drag{
+  border-color:var(--accent2);
+  background:rgba(230,0,18,.06);
+  transform:translateY(-1px);
+}
+.icon{
+  width:56px;
+  height:56px;
+  margin:0 auto;
+  background:#0b0e13;
+  border-radius:12px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  overflow:hidden;
+}
+.arrow{
+  position:relative;
+  width:10px;
+  height:15px;
+  margin-bottom:2px;
+}
+.arrow-head{
+  position:absolute;
+  top:0;
+  left:50%;
+  width:8px;
+  height:8px;
+  border-left:3px solid white;
+  border-top:3px solid white;
+  transform:
+    translateX(-50%)
+    rotate(45deg);
+}
+.arrow-shaft{
+  position:absolute;
+  left:50%;
+  bottom:0;
+  width:3px;
+  height:10px;
+  background:white;
+  transform:translateX(-50%);
+  border-radius:2px;
+}
+.nx{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:Arial Black,Impact,sans-serif;
+  font-size:20px;
+  font-weight:900;
+  line-height:1;
+  letter-spacing:-2px;
+}
+.n{
+  color:#e60012;
+}
+.x{
+  color:#00a8e8;
+}
+.drop-icon{
+  width:64px;
+  height:64px;
+  margin:0 auto 16px;
+  border-radius:14px;
+  background:#202833;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:32px;
+}
+.drop-title{
+  font-size:17px;
+  font-weight:650;
+}
+.drop-hint{
+  margin-top:7px;
+  color:var(--muted);
+  font-size:13px;
+}
+#file{display:none}
+.file-info{
+  display:none;
+  margin-top:14px;
+  padding:12px 14px;
+  border-radius:10px;
+  background:var(--panel2);
+  border:1px solid var(--border);
+  font-size:14px;
+}
+.file-name{
+  font-weight:600;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.file-size{
+  color:var(--muted);
+  margin-top:3px;
+  font-size:12px;
+}
+button{
+  width:100%;
+  margin-top:16px;
+  padding:13px 18px;
+  border:0;
+  border-radius:10px;
+  background:linear-gradient(135deg,var(--accent2),var(--accent));
+  color:white;
+  font-size:15px;
+  font-weight:700;
+  cursor:pointer;
+  transition:.15s;
+}
+button:hover{filter:brightness(1.08)}
+button:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+.progress-wrap{
+  display:none;
+  margin-top:20px;
+}
+.progress-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+  font-size:13px;
+}
+.progress-label{color:var(--muted)}
+#percent{font-weight:700}
+.progress{
+  height:10px;
+  background:#252d38;
+  border-radius:99px;
+  overflow:hidden;
+}
+#bar{
+  width:0%;
+  height:100%;
+  border-radius:99px;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+  transition:width .08s linear;
+  box-shadow:0 0 15px rgba(255,57,72,.35);
+}
+#status{
+  margin-top:14px;
+  min-height:20px;
+  text-align:center;
+  font-size:13px;
+  color:var(--muted);
+}
+.success{color:var(--green)!important}
+.error{color:#ff6571!important}
+.footer{
+  text-align:center;
+  color:#626d7c;
+  font-size:11px;
+  margin-top:15px;
+}
+.badge{
+  display:inline-block;
+  padding:3px 7px;
+  border-radius:5px;
+  background:#202833;
+  color:#9ca8b8;
+  margin-top:5px;
+}
+@media(max-width:500px){
+  body{padding:14px}
+  .card{padding:16px}
+  h1{font-size:24px}
+}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+
+<div class="header">
+  <div class="icon">
+    <div class="arrow"><div class="arrow-head"></div><div class="arrow-shaft"></div></div>
+    <div class="nx"><span class="n">N</span><span class="x">X</span></div>
+<div class="accent"></div>
+
+</div>
+  <h1>NX Uploader</h1>
+  <div class="subtitle">Transfer files directly to your Nintendo Switch</div>
+</div>
+
+<div class="card">
+
+<form id="uploadForm">
+
+<label class="drop" id="drop">
+  <div class="drop-icon">&#128190;</div>
+  <div class="drop-title">Choose a file</div>
+  <div class="drop-hint">Click here or drag &amp; drop a file</div>
+  <input id="file" name="file" type="file">
+</label>
+
+<div class="file-info" id="fileInfo">
+  <div class="file-name" id="fileName"></div>
+  <div class="file-size" id="fileSize"></div>
+</div>
+
+<button id="upload" type="submit" disabled>Upload to Switch</button>
+
+</form>
+<button id="cancel" type="button" style="display:none">Cancel upload</button>
+<div class="progress-wrap" id="progressWrap">
+  <div class="progress-top">
+    <span class="progress-label" id="progressLabel">Uploading...</span>
+    <span id="percent">0%</span>
+  </div>
+  <div class="progress">
+    <div id="bar"></div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+</div>
+
+<div class="footer">
+NX Uploader
+<br>
+<span class="badge">Local network transfer</span>
+</div>
+
+</div>
+
+<script>
+let xhr = null;
+const form=document.getElementById('uploadForm');
+const fileInput=document.getElementById('file');
+const drop=document.getElementById('drop');
+const fileInfo=document.getElementById('fileInfo');
+const fileName=document.getElementById('fileName');
+const fileSize=document.getElementById('fileSize');
+const upload=document.getElementById('upload');
+const progressWrap=document.getElementById('progressWrap');
+const bar=document.getElementById('bar');
+const percent=document.getElementById('percent');
+const status=document.getElementById('status');
+const progressLabel=document.getElementById('progressLabel');
+const cancel=document.getElementById('cancel');
+cancel.style.display='none';
+cancel.onclick = function(){
+  if (xhr) xhr.abort();
+};
+function formatBytes(n){
+  if(n<1024)return n+' B';
+  if(n<1024*1024)return (n/1024).toFixed(1)+' KB';
+  if(n<1024*1024*1024)return (n/(1024*1024)).toFixed(1)+' MB';
+  return (n/(1024*1024*1024)).toFixed(2)+' GB';
+}
+
+function selectFile(file){
+  if(!file)return;
+  fileName.textContent=file.name;
+  fileSize.textContent=formatBytes(file.size);
+  fileInfo.style.display='block';
+  upload.disabled=false;
+  status.textContent='Ready to upload';
+  status.className='';
+}
+
+fileInput.addEventListener('change',function(){
+  selectFile(this.files[0]);
+});
+
+drop.addEventListener('dragover',function(e){
+  e.preventDefault();
+  drop.classList.add('drag');
+});
+
+drop.addEventListener('dragleave',function(){
+  drop.classList.remove('drag');
+});
+
+drop.addEventListener('drop',function(e){
+  e.preventDefault();
+  drop.classList.remove('drag');
+  if(e.dataTransfer.files.length){
+    fileInput.files=e.dataTransfer.files;
+    selectFile(e.dataTransfer.files[0]);
+  }
+});
+
+form.addEventListener('submit',function(e){
+  e.preventDefault();
+
+  const file=fileInput.files[0];
+  if(!file)return;
+
+  upload.disabled=true;
+  progressWrap.style.display='block';
+  bar.style.width='0%';
+  percent.textContent='0%';
+  progressLabel.textContent='Uploading...';
+  status.textContent='Sending '+file.name+' to the Switch...';
+  status.className='';
+
+  xhr = new XMLHttpRequest();
+  cancel.style.display='block';
+  const data=new FormData();
+  data.append('file',file);
+
+  xhr.upload.addEventListener('progress',function(e){
+    if(e.lengthComputable){
+      const p=Math.round((e.loaded/e.total)*100);
+      bar.style.width=p+'%';
+      percent.textContent=p+'%';
+      progressLabel.textContent='Uploading... '+formatBytes(e.loaded)+' / '+formatBytes(e.total);
+    }
+  });
+
+  xhr.addEventListener('load',function(){
+    if(xhr.status>=200&&xhr.status<300){
+      bar.style.width='100%';
+      percent.textContent='100%';
+      progressLabel.textContent='Upload complete';
+      status.textContent='File successfully transferred to the Switch.';
+      status.className='success';
+    }else{
+      progressLabel.textContent='Upload failed';
+      status.textContent='Server returned HTTP '+xhr.status;
+      status.className='error';
+    }
+    upload.disabled=false;
+    xhr = null;
+    cancel.style.display='none';
+  });
+
+  xhr.addEventListener('error',function(){
+    progressLabel.textContent='Connection error';
+    status.textContent='Could not connect to the Switch.';
+    status.className='error';
+    upload.disabled=false;
+    xhr = null;
+    cancel.style.display='none';
+  });
+
+  xhr.addEventListener('abort',function(){
+    progressLabel.textContent='Cancelled';
+    status.textContent='Upload cancelled.';
+    status.className='error';
+    upload.disabled=false;
+    xhr = null;
+    cancel.style.display='none';
+  });
+
+  xhr.open('POST',window.location.href,true);
+  xhr.send(data);
+});
+</script>
+
+</body>
+</html>
