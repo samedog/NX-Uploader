@@ -25,7 +25,7 @@ The Switch is already on my LAN. It's already running homebrew. Both of
 those things are true any time I want to move a file onto it. So the
 whole job should be "drag file into browser tab" and nothing else.
 
-So I built that. NX Uploader is ~700 lines of C and ~400 of HTML/CSS/JS,
+So I built that. NX Uploader is ~1000 lines of C and ~700 of HTML/CSS/JS,
 speaks HTTP/1.1, and streams uploads straight to disk instead of
 buffering in RAM, so multi-gigabyte files work fine.
 
