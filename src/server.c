@@ -15,6 +15,7 @@
 #include "app_state.h"
 #include "html.h"
 #include "multipart.h"
+#include "fileman.h"
 #include "server.h"
 
 #define PORT        8080
@@ -177,10 +178,104 @@ static void handle_client(int fd){
         if (wants_100) send_str(fd, "HTTP/1.1 100 Continue\r\n\r\n");
 
         char ctype[512];
-        if (copy_header_value(headers, "Content-Type", ctype, sizeof(ctype)) != 0 ||
-            !strstr(ctype, "multipart/form-data")){
+        if (copy_header_value(headers, "Content-Type", ctype, sizeof(ctype)) != 0){
             send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
-                         "Connection: close\r\n\r\nMissing or invalid Content-Type.\n");
+                         "Connection: close\r\n\r\nMissing Content-Type.\n");
+            return;
+        }
+
+        if (strncmp(ctype, "text/plain", 10) == 0){
+            // Drain the (tiny) body into a local buffer.
+            char cmd[600];
+            size_t have = 0;
+
+            char *body_start = hdr_end + 4;
+            size_t already = (size_t)(got - (body_start - req));
+            if (already > (size_t)clen) already = (size_t)clen;
+            if (already > 0){
+                size_t copy = already < sizeof(cmd) - 1 ? already : sizeof(cmd) - 1;
+                memcpy(cmd, body_start, copy);
+                have = copy;
+            }
+
+            long long got_body = (long long)already;
+            while (got_body < clen && have < sizeof(cmd) - 1){
+                ssize_t n = recv(fd, cmd + have, sizeof(cmd) - 1 - have, 0);
+                if (n <= 0) break;
+                have += (size_t)n;
+                got_body += n;
+            }
+            cmd[have] = 0;
+
+            // Parse: "<VERB> <arg>" where arg may be empty.
+            char verb[16] = {0};
+            char arg[512] = {0};
+            sscanf(cmd, "%15s %511[^\r\n]", verb, arg);
+
+            // Trim trailing whitespace from arg.
+            size_t al = strlen(arg);
+            while (al > 0 && (arg[al-1] == ' ' || arg[al-1] == '\t' ||
+                              arg[al-1] == '\r' || arg[al-1] == '\n')){
+                arg[--al] = 0;
+            }
+
+            if (strcmp(verb, "LIST") == 0){
+                char listing[LIST_BUF_SIZE];
+                int n = list_dir(arg, listing, sizeof(listing));
+                if (n < 0){
+                    send_str(fd, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\ncannot list directory\n");
+                    return;
+                }
+                char hdr[256];
+                int hl = snprintf(hdr, sizeof(hdr),
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/plain; charset=utf-8\r\n"
+                    "Content-Length: %d\r\n"
+                    "Connection: close\r\n\r\n", n);
+                send_all(fd, hdr, (size_t)hl);
+                send_all(fd, listing, (size_t)n);
+                return;
+            }
+
+            if (strcmp(verb, "DEL") == 0){
+                if (delete_path(arg) == 0){
+                    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nok\n");
+                } else {
+                    send_str(fd, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\ncannot delete\n");
+                }
+                return;
+            }
+
+
+            if (strcmp(verb, "MKDIR") == 0){
+                if (arg[0] == 0){
+                    send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nmissing folder name\n");
+                    return;
+                }
+                if (make_dir(arg) == 0){
+                    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nok\n");
+                } else {
+                    send_str(fd, "HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\ncannot create folder\n");
+                }
+                return;
+            }
+
+            send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                         "Connection: close\r\n\r\nUnknown command.\n");
+            return;
+        }
+        // -------- end LIST branch --------
+
+
+        if (!strstr(ctype, "multipart/form-data")){
+            send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                         "Connection: close\r\n\r\nInvalid Content-Type.\n");
             return;
         }
 
@@ -194,8 +289,17 @@ static void handle_client(int fd){
         char *body_start = hdr_end + 4;
         size_t already = (size_t)(got - (body_start - req));
         if (already > (size_t)clen) already = (size_t)clen;
+        char upload_dir[512] = {0};
+        copy_header_value(headers, "X-Upload-Dir", upload_dir, sizeof(upload_dir));
+
+        if (upload_dir[0] == '/' || strstr(upload_dir, "..") ||
+            strchr(upload_dir, ':') || strchr(upload_dir, '\\')){
+            upload_dir[0] = 0;
+        }
+
         MultipartParser mp;
         mp_init(&mp, boundary);
+        snprintf(mp.dest_dir, sizeof(mp.dest_dir), "%s", upload_dir);
         char *buf = malloc(READ_CHUNK);
         if (!buf){
             send_str(fd, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n"

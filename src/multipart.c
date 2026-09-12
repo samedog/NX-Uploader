@@ -85,8 +85,19 @@ static int mp_process_headers(MultipartParser *mp){
     char fname[MAX_FILENAME];
     if (extract_quoted(mp->hdr, "filename=", fname, sizeof(fname)) == 0 && fname[0]){
         sanitize_filename(fname);
-        char path[512];
-        snprintf(path, sizeof(path), "%s/%s", UPLOAD_DIR, fname);
+        char dir[520];
+        if (mp->dest_dir[0]){
+            snprintf(dir, sizeof(dir), "sdmc:/%s", mp->dest_dir);
+        } else {
+            snprintf(dir, sizeof(dir), "%s", UPLOAD_DIR);
+        }
+        char path[800];
+        int pn = snprintf(path, sizeof(path), "%s/%s", dir, fname);
+        if (pn < 0 || (size_t)pn >= sizeof(path)){
+            mp->out = NULL;
+            return 0;
+        }
+        snprintf(path, sizeof(path), "%s/%s", dir, fname);
         FILE *f = fopen(path, "wb");
         if (!f){
             mp->out = NULL;
@@ -237,7 +248,7 @@ int mp_feed(MultipartParser *mp, const char *chunk, int chunk_len){
 void mp_init(MultipartParser *mp, const char *boundary){
     memset(mp, 0, sizeof(*mp));
     mp->state = PS_PREAMBLE;
-
+    
     mp->firstlen = snprintf(mp->first, sizeof(mp->first), "--%s", boundary);
     mp->midlen   = snprintf(mp->mid,   sizeof(mp->mid),   "\r\n--%s", boundary);
     mp->closinglen = snprintf(mp->closing, sizeof(mp->closing),

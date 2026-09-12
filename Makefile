@@ -10,7 +10,7 @@ TOPDIR ?= $(CURDIR)
 
 APP_TITLE   := NX Uploader
 APP_AUTHOR  := The Samedog
-APP_VERSION := 1.0.0
+APP_VERSION := 2.0.0
 APP_ICON    := $(TOPDIR)/icon.jpg
 
 TARGET   := NXUploader

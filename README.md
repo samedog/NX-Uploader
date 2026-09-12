@@ -32,7 +32,7 @@ buffering in RAM, so multi-gigabyte files work fine.
 Also, honestly: why not.
 
 
-![NX Uploader Web UI Screenshot](images/Screenshot_20260911_220646.png)
+![NX Uploader Web UI Screenshot](images/Screenshot_20260912_174523.png)
 
 ## Features
 

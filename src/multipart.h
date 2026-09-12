@@ -30,6 +30,7 @@ typedef struct {
     char   out_path[512];
     int    files_saved;
     int    opened_a_file;
+    char   dest_dir[512];
 } MultipartParser;
 
 void mp_init(MultipartParser *mp, const char *boundary);

@@ -253,6 +253,120 @@ button:disabled{
   .card{padding:16px}
   h1{font-size:24px}
 }
+.fm-bar{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:12px;
+}
+.fm-btn{
+  width:auto;
+  margin:0;
+  padding:7px 12px;
+  font-size:13px;
+  font-weight:600;
+  background:var(--panel2);
+  color:var(--text);
+  border:1px solid var(--border);
+}
+.fm-btn:hover{ filter:brightness(1.15); }
+.fm-btn:disabled{ opacity:.4; }
+.fm-path{
+  flex:1;
+  min-width:0;
+  padding:7px 11px;
+  background:#0b0e13;
+  border:1px solid var(--border);
+  border-radius:8px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:12.5px;
+  color:var(--muted);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.fm-table-wrap{
+  max-height:420px;
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:#0b0e13;
+}
+.fm-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:13.5px;
+}
+.fm-table thead th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:var(--panel2);
+  text-align:left;
+  font-weight:600;
+  font-size:12px;
+  color:var(--muted);
+  padding:9px 12px;
+  border-bottom:1px solid var(--border);
+}
+.fm-size-col{ width:90px; text-align:right; }
+.fm-table tbody td{
+  padding:8px 12px;
+  border-bottom:1px solid #1c232d;
+}
+.fm-table tbody tr:last-child td{ border-bottom:0; }
+.fm-table tbody tr.fm-row{ cursor:pointer; }
+.fm-table tbody tr.fm-row:hover{ background:rgba(255,255,255,.03); }
+.fm-name{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  overflow:hidden;
+}
+.fm-name span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.fm-ico{ flex:0 0 auto; opacity:.85; }
+.fm-size{
+  text-align:right;
+  color:var(--muted);
+  font-variant-numeric:tabular-nums;
+  font-size:12px;
+}
+.fm-empty,.fm-status{
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+  padding:18px;
+}
+.fm-status{ padding:10px 0 0; min-height:18px; }
+.fm-status.error{ color:#ff6571; }
+.fm-del{
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 4px 9px;
+  width: auto;
+  border: 1px solid #3a2028;
+  border-radius: 6px;
+  background: #1e1419;
+  color: #ff8592;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.fm-row:hover .fm-del{ opacity: 1; }
+.fm-del:hover{ background: #2a1a20; color: #ffb0b8; filter: none; }
+@media (hover: none){
+  .fm-del{ opacity: 1; }
+}
+.fm-act-col{ width: 52px; }
+.fm-new{
+  flex: 0 0 auto;
+}
 </style>
 </head>
 
@@ -272,38 +386,62 @@ button:disabled{
 
 <div class="card">
 
-<form id="uploadForm">
-
-<label class="drop" id="drop">
-  <div class="drop-icon">&#128190;</div>
-  <div class="drop-title">Choose a file</div>
-  <div class="drop-hint">Click here or drag &amp; drop a file</div>
-  <input id="file" name="file" type="file">
-</label>
-
-<div class="file-info" id="fileInfo">
-  <div class="file-name" id="fileName"></div>
-  <div class="file-size" id="fileSize"></div>
-</div>
-
-<button id="upload" type="submit" disabled>Upload to Switch</button>
-
-</form>
-<button id="cancel" type="button" style="display:none">Cancel upload</button>
-<div class="progress-wrap" id="progressWrap">
-  <div class="progress-top">
-    <span class="progress-label" id="progressLabel">Uploading...</span>
-    <span id="percent">0%</span>
+  <div class="fm-bar">
+    <button id="fmUp" class="fm-btn" type="button" title="Up one level">&#x2190; Back</button>
+    <button id="fmRefresh" class="fm-btn" type="button" title="Refresh">&#8635;</button>
+    <button id="fmNewFolder" class="fm-btn" type="button" title="New folder">New Folder</button>
+    <div class="fm-path" id="fmPath">sdmc:/</div>
   </div>
-  <div class="progress">
-    <div id="bar"></div>
+
+  <div class="fm-table-wrap">
+    <table class="fm-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th class="fm-size-col">Size</th>
+            <th class="fm-act-col"></th>
+        </tr>
+      </thead>
+      <tbody id="fmBody">
+        <tr><td colspan="3" class="fm-empty">Loading…</td></tr>
+      </tbody>
+    </table>
   </div>
+
+  <div id="fmStatus" class="fm-status"></div>
+
+  <form id="uploadForm">
+    <label class="drop" id="drop">
+      <div class="drop-title">Drop a file here to upload</div>
+      <div class="drop-hint" id="dropHint">to sdmc:/</div>
+      <input id="file" name="file" type="file">
+    </label>
+
+    <div class="file-info" id="fileInfo">
+      <div class="file-name" id="fileName"></div>
+      <div class="file-size" id="fileSize"></div>
+    </div>
+
+    <button id="upload" type="submit" disabled>Upload to Switch</button>
+  </form>
+
+  <button id="cancel" type="button" style="display:none">Cancel upload</button>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-top">
+      <span class="progress-label" id="progressLabel">Uploading...</span>
+      <span id="percent">0%</span>
+    </div>
+    <div class="progress">
+      <div id="bar"></div>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+
+
 </div>
-
-<div id="status"></div>
-
-</div>
-
 <div class="footer">
 NX Uploader
 <br>
@@ -327,6 +465,7 @@ const percent=document.getElementById('percent');
 const status=document.getElementById('status');
 const progressLabel=document.getElementById('progressLabel');
 const cancel=document.getElementById('cancel');
+const fmNewFolder = document.getElementById('fmNewFolder');
 cancel.style.display='none';
 cancel.onclick = function(){
   if (xhr) xhr.abort();
@@ -370,6 +509,38 @@ drop.addEventListener('drop',function(e){
   }
 });
 
+fmNewFolder.onclick = async function(){
+    const name = prompt('New folder name:');
+    if (!name) return;
+
+    // Reject the characters exFAT forbids, plus slashes.
+    if (/[\\/:*?"<>|]/.test(name) || name === '.' || name === '..'){
+        fmStatus.textContent = 'Invalid folder name.';
+        fmStatus.className = 'fm-status error';
+        return;
+    }
+
+    const rel = fm.cwd ? fm.cwd + '/' + name : name;
+
+    try {
+        const res = await fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'MKDIR ' + rel,
+        });
+        if (!res.ok){
+            const msg = await res.text();
+            throw new Error(msg || ('HTTP ' + res.status));
+        }
+        fmStatus.textContent = '';
+        fmStatus.className = 'fm-status';
+        fm.load(fm.cwd);
+    } catch (e){
+        fmStatus.textContent = 'Could not create folder: ' + e.message;
+        fmStatus.className = 'fm-status error';
+    }
+};
+
 form.addEventListener('submit',function(e){
   e.preventDefault();
 
@@ -405,6 +576,7 @@ form.addEventListener('submit',function(e){
       progressLabel.textContent='Upload complete';
       status.textContent='File successfully transferred to the Switch.';
       status.className='success';
+      fm.load(fm.cwd);
     }else{
       progressLabel.textContent='Upload failed';
       status.textContent='Server returned HTTP '+xhr.status;
@@ -434,8 +606,129 @@ form.addEventListener('submit',function(e){
   });
 
   xhr.open('POST',window.location.href,true);
+  xhr.setRequestHeader('X-Upload-Dir', fm.cwd);
   xhr.send(data);
 });
+
+/* ---------- file manager ---------- */
+const fm = {
+  cwd: '',
+  loaded: false,
+  busy: false,
+};
+
+const fmBody    = document.getElementById('fmBody');
+const fmPath    = document.getElementById('fmPath');
+const fmStatus  = document.getElementById('fmStatus');
+const fmUp      = document.getElementById('fmUp');
+const fmRefresh = document.getElementById('fmRefresh');
+
+fmRefresh.onclick = () => fm.load(fm.cwd);
+fmUp.onclick      = () => fm.load(fm.cwd ? fm.cwd.replace(/\/?[^/]+$/, '') : '');
+
+fm.load = async function(rel) {
+  if (fm.busy) return;
+  fm.busy = true;
+  fmStatus.textContent = '';
+  fmStatus.className = 'fm-status';
+  fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">Loading…</td></tr>';
+
+  try {
+    const res = await fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: 'LIST ' + rel,
+    });
+   
+
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || ('HTTP ' + res.status));
+    }
+
+    const text = await res.text();
+
+    fm.cwd = rel;
+    fm.loaded = true;
+    fmPath.textContent = 'sdmc:/' + rel;
+    document.getElementById('dropHint').textContent = 'to sdmc:/' + rel;
+    fmUp.disabled = (rel === '');
+
+    const rows = text.split('\n').filter(Boolean);
+    if (!rows.length) {
+      fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">Empty folder</td></tr>';
+      return;
+    }
+    rows.sort((a, b) => {
+      const [ka, na] = a.split('\t');
+      const [kb, nb] = b.split('\t');
+      if (ka !== kb) return ka === 'D' ? -1 : 1;   // dirs first
+      return na.localeCompare(nb, undefined, {sensitivity: 'base'});
+    });
+    fmBody.innerHTML = '';
+    for (const line of rows) {
+      const parts = line.split('\t');
+      const kind = parts[0];
+      const name = parts[1];
+      const size = parseInt(parts[2], 10) || 0;
+      if (!name) continue;
+
+      const isDir = kind === 'D';
+
+      const tr = document.createElement('tr');
+      tr.className = 'fm-row';
+      tr.innerHTML =
+        '<td><div class="fm-name">' +
+          '<span class="fm-ico">' + (isDir ? '&#128193;' : '&#128196;') + '</span>' +
+          '<span></span>' +
+        '</div></td>' +
+        '<td class="fm-size">' + (isDir ? '' : formatBytes(size)) + '</td>' +
+        '<td><button class="fm-del" type="button" title="Delete">&#10005;</button></td>';
+      tr.querySelector('.fm-name span:last-child').textContent = name;
+
+      const delBtn = tr.querySelector('.fm-del');
+      delBtn.onclick = (e) => {
+        e.stopPropagation();   // don't trigger the row's navigate handler
+        fm.delete(name, isDir);
+      };
+
+      if (isDir) {
+        tr.onclick = () => fm.load(fm.cwd ? fm.cwd + '/' + name : name);
+      }
+      fmBody.appendChild(tr);
+    }
+
+  } catch (e) {
+    fmStatus.textContent = 'Could not list directory: ' + e.message;
+    fmStatus.className = 'fm-status error';
+    fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">—</td></tr>';
+  } finally {
+    fm.busy = false;
+  }
+};
+fm.delete = async function(name, isDir){
+    const rel = fm.cwd ? fm.cwd + '/' + name : name;
+    const label = isDir ? 'folder' : 'file';
+    if (!confirm('Delete ' + label + ' "' + name + '"?\n\nThis cannot be undone.'))
+        return;
+
+    try {
+        const res = await fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'DEL ' + rel,
+        });
+        if (!res.ok){
+            const msg = await res.text();
+            throw new Error(msg || ('HTTP ' + res.status));
+        }
+        fm.load(fm.cwd);
+    } catch (e){
+        fmStatus.textContent = 'Delete failed: ' + e.message;
+        fmStatus.className = 'fm-status error';
+    }
+};
+fm.load('');
 </script>
 
 </body>
