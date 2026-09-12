@@ -15,6 +15,8 @@
 
 AppState g;
 
+// Formats a bytes/sec rate as a human-readable string. Picks the unit
+// based on magnitude (B/s through GB/s).
 static void format_speed(long bps, char *out, size_t outsz){
     if (bps < 0) bps = 0;
     const char *unit;
@@ -34,6 +36,12 @@ static void format_speed(long bps, char *out, size_t outsz){
 }
 
 
+// Renders the console UI. Called once per main-loop iteration.
+//
+// Also updates g.speed_bps as a side effect: it samples bytes_received
+// on a fixed cadence (every ~250ms) and applies an exponential moving
+// average so the displayed rate doesn't jitter. This is the only place
+// speed_bps is updated.
 static void draw_ui(void){
     static u64 last_sample_tick = 0;
     static long last_sample_bytes = 0;

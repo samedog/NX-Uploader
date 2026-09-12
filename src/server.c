@@ -1,7 +1,24 @@
 /* SPDX-License-Identifier: MIT
- * Copyright (c) 2026 Diego Cardenas "The Samedog" 
+ * Copyright (c) 2026 Diego Cardenas "The Samedog"
  */
 // server.c
+//
+// Minimal HTTP/1.1 server. Two request types are handled:
+//
+//   GET  /            -> serves the embedded web UI (HTML_FORM)
+//   POST /            -> dispatches on Content-Type:
+//       text/plain        -> one-line command, e.g. "LIST switch" or
+//                            "DEL switch/foo.nro". See the LIST branch
+//                            below for the full verb list.
+//       multipart/form-data -> file upload. Destination directory comes
+//                            from the X-Upload-Dir header (relative to
+//                            sdmc:/); falls back to sdmc:/switch/uploads.
+//
+// One connection at a time, no keep-alive, no pipelining. Requests are
+// handled synchronously and the socket is closed after the response.
+// This is deliberate: the only client is a browser on the LAN, and
+// concurrent uploads aren't a use case worth the complexity (yet).
+
 #include <switch.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -22,7 +39,8 @@
 #define MAX_HEADERS 8192
 #define MAX_UPLOAD_BYTES (32LL * 1024 * 1024 * 1024)
 
-
+// send() on a TCP socket may write fewer bytes than requested. Loop
+// until everything is out, or return -1 on error.
 static int send_all(int fd, const void *buf, size_t len){
     size_t sent = 0;
     while (sent < len){
@@ -37,7 +55,10 @@ static void send_str(int fd, const char *s){
     send_all(fd, s, strlen(s));
 }
 
-
+// Locates the value of an HTTP header. Header names are matched
+// case-insensitively. Returns a pointer into `headers` (not
+// NUL-terminated at the value boundary — use copy_header_value for
+// a clean string), or NULL if the header isn't present.
 static const char *find_header(const char *headers, const char *name){
     size_t nlen = strlen(name);
     const char *line = headers;
@@ -57,6 +78,8 @@ static const char *find_header(const char *headers, const char *name){
     return NULL;
 }
 
+// Same as find_header(), but copies the value into "out" and
+// NUL-terminates it. Returns 0 on success, -1 if the header is missing.
 static int copy_header_value(const char *headers, const char *name, char *out, size_t outsz){
     const char *v = find_header(headers, name);
     if (!v) return -1;
@@ -69,7 +92,11 @@ static int copy_header_value(const char *headers, const char *name, char *out, s
     return 0;
 }
 
-// value here may or may not be quoted
+// Extracts a parameter value from a header liek:
+//   Content-Type: multipart/form-data; boundary=----WebKitFormBoundary...
+//   Content-Type: multipart/form-data; boundary="----WebKitFormBoundary..."
+// handles both  quoted and unquoted forms. Returns 0 on success,
+// -1 if the key isn't found or the value is empty.
 static int extract_token(const char *hay, const char *key, char *out, size_t outsz){
     const char *p = strstr(hay, key);
     if (!p) return -1;
@@ -97,6 +124,19 @@ static int extract_token(const char *hay, const char *key, char *out, size_t out
     return (i > 0) ? 0 : -1;
 }
 
+// Handles a single HTTP request end-to-end.
+//
+// Order matters:
+//   1. Read headers into a fixed buffer. Bail if the request never
+//      sends a blank line (no complete request).
+//   2. Dispatch on method: GET serves the UI, POST does everything else.
+//   3. For POST, the Content-Length check happens *before* the
+//      Content-Type check, so an oversized body can be refused without
+//      parsing headers we don't care about.
+//   4. The Expect: 100-continue handshake must happen before any body
+//      read. If we don't send "100 Continue" clients wait forever and time out.
+//   5. Only then do we look at Content-Type to decide
+//      text/plain (command) vs multipart/form-data (upload).
 static void handle_client(int fd){
     char req[MAX_HEADERS];
     size_t got = 0;
@@ -270,7 +310,6 @@ static void handle_client(int fd){
                          "Connection: close\r\n\r\nUnknown command.\n");
             return;
         }
-        // -------- end LIST branch --------
 
 
         if (!strstr(ctype, "multipart/form-data")){

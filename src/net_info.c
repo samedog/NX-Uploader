@@ -18,6 +18,11 @@ void detect_local_ip(void){
         return;
     }
     struct in_addr a;
+    // gethostid() on libnx returns the address in host byte order,
+    // but our in_addr wants network byte order. The double swap
+    // (bswap + htonl) is intentional: on the little-endian Switch,
+    // htonl() is a no-op, so the bswap does the real work, the htonl
+    // makes this correct on a hypothetical big-endian host too (maybe?).
     a.s_addr = htonl(__builtin_bswap32((uint32_t)id));
     const char *s = inet_ntoa(a);
     strncpy(g_ip, s, sizeof(g_ip) - 1);
