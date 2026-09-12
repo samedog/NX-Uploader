@@ -1,9 +1,9 @@
 # NX Uploader
 
-A minimal HTTP file-upload server for the Nintendo Switch. Runs in homebrew
-mode, serves a web page on your LAN, and lets any browser on the same
-network drop files straight onto the SD card. No client software, no FTP,
-no jank (it's VERY janky).
+A minimal HTTP file manager and uploader server for the Nintendo Switch. 
+Runs in homebrew mode, serves a web page on your LAN, and lets any browser 
+on the same network drop files straight onto the SD card. No client software, 
+no FTP,no jank (it's VERY janky, LOL).
 
 ## Why
 
