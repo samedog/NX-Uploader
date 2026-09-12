@@ -3,20 +3,19 @@
 A minimal HTTP file-upload server for the Nintendo Switch. Runs in homebrew
 mode, serves a web page on your LAN, and lets any browser on the same
 network drop files straight onto the SD card. No client software, no FTP,
-no jank.
+no jank (it's VERY janky).
 
 ## Why
 
-My Switch is docked almost all the time. I also emulate a lot on PC, so
+My Switch is docked almost all the time. I also emulate a lot on the switch, so
 there's a constant trickle of ROMs, saves, texture packs, mods, and
 random `.nro`s that need to end up on the SD card. The usual options all
 sucked in the same way:
 
 - **Pull the SD card**, eject, find a reader, copy, put it back, wait
-  for the console to remount everything. Ten minutes of friction for a
+  for the console to boot. Five minutes of friction for a
   five-second file transfer.
-- **Plug in a USB cable**, only works over the right homebrew tools,
-  and half the time the driver situation on my machine is a coin flip.
+- **Plug in a USB cable**, no.
 - **FTP**, the server on the Switch is slow, drops connections on
   large files, and wants a dedicated client open on the other end. I
   don't want a client, I want a browser tab.
@@ -31,6 +30,9 @@ speaks HTTP/1.1, and streams uploads straight to disk instead of
 buffering in RAM, so multi-gigabyte files work fine.
 
 Also, honestly: why not.
+
+
+![NX Uploader Web UI Screenshot](images/Screenshot_20260911_220646.png)
 
 ## Features
 
@@ -47,7 +49,7 @@ Also, honestly: why not.
 
 ## Requirements
 
-- A Nintendo Switch with homebrew access (Atmosphère, etc.)
+- A Nintendo Switch with homebrew access (Atmosphere, etc.)
 - Wi-Fi or Ethernet connection on the same LAN as your browser machine
 
 ## Usage
