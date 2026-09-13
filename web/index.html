@@ -231,6 +231,7 @@ button:disabled{
   text-align:center;
   font-size:13px;
   color:var(--muted);
+  white-space: pre-line;
 }
 .success{color:var(--green)!important}
 .error{color:#ff6571!important}
@@ -414,7 +415,7 @@ button:disabled{
     <label class="drop" id="drop">
       <div class="drop-title">Drop a file here to upload</div>
       <div class="drop-hint" id="dropHint">to sdmc:/</div>
-      <input id="file" name="file" type="file">
+      <input id="file" name="file" type="file" multiple>
     </label>
 
     <div class="file-info" id="fileInfo">
@@ -477,18 +478,26 @@ function formatBytes(n){
   return (n/(1024*1024*1024)).toFixed(2)+' GB';
 }
 
-function selectFile(file){
-  if(!file)return;
-  fileName.textContent=file.name;
-  fileSize.textContent=formatBytes(file.size);
-  fileInfo.style.display='block';
-  upload.disabled=false;
-  status.textContent='Ready to upload';
-  status.className='';
+function selectFiles(files){
+  if (!files || !files.length) return;
+
+  if (files.length === 1){
+    fileName.textContent = files[0].name;
+    fileSize.textContent = formatBytes(files[0].size);
+  } else {
+    let total = 0;
+    for (const f of files) total += f.size;
+    fileName.textContent = files.length + ' files';
+    fileSize.textContent = formatBytes(total);
+  }
+  fileInfo.style.display = 'block';
+  upload.disabled = false;
+  status.textContent = 'Ready to upload';
+  status.className = '';
 }
 
-fileInput.addEventListener('change',function(){
-  selectFile(this.files[0]);
+fileInput.addEventListener('change', function(){
+  selectFiles(this.files);
 });
 
 drop.addEventListener('dragover',function(e){
@@ -503,9 +512,9 @@ drop.addEventListener('dragleave',function(){
 drop.addEventListener('drop',function(e){
   e.preventDefault();
   drop.classList.remove('drag');
-  if(e.dataTransfer.files.length){
-    fileInput.files=e.dataTransfer.files;
-    selectFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length){
+    fileInput.files = e.dataTransfer.files;
+    selectFiles(e.dataTransfer.files);   // was selectFile(e.dataTransfer.files[0])
   }
 });
 
@@ -541,24 +550,27 @@ fmNewFolder.onclick = async function(){
     }
 };
 
-form.addEventListener('submit',function(e){
+form.addEventListener('submit', function(e){
   e.preventDefault();
 
-  const file=fileInput.files[0];
-  if(!file)return;
+  const files = fileInput.files;
+  if (!files.length) return;
+
+  const count = files.length;
+  const label = count === 1 ? files[0].name : (count + ' files');
 
   upload.disabled=true;
   progressWrap.style.display='block';
   bar.style.width='0%';
   percent.textContent='0%';
   progressLabel.textContent='Uploading...';
-  status.textContent='Sending '+file.name+' to the Switch...';
+  status.textContent = 'Sending ' + label + ' to the Switch...';
   status.className='';
 
   xhr = new XMLHttpRequest();
   cancel.style.display='block';
   const data=new FormData();
-  data.append('file',file);
+  for (const f of fileInput.files) data.append('file', f);
 
   xhr.upload.addEventListener('progress',function(e){
     if(e.lengthComputable){
@@ -574,7 +586,7 @@ form.addEventListener('submit',function(e){
       bar.style.width='100%';
       percent.textContent='100%';
       progressLabel.textContent='Upload complete';
-      status.textContent='File successfully transferred to the Switch.';
+      status.textContent = xhr.responseText.trim() || 'Upload complete.';
       status.className='success';
       fm.load(fm.cwd);
     }else{
@@ -631,7 +643,7 @@ fm.load = async function(rel) {
   fm.busy = true;
   fmStatus.textContent = '';
   fmStatus.className = 'fm-status';
-  fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">Loading…</td></tr>';
+  fmBody.innerHTML = '<tr><td colspan="3" class="fm-empty">Loading…</td></tr>';
 
   try {
     const res = await fetch(window.location.href, {
@@ -656,7 +668,7 @@ fm.load = async function(rel) {
 
     const rows = text.split('\n').filter(Boolean);
     if (!rows.length) {
-      fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">Empty folder</td></tr>';
+      fmBody.innerHTML = '<tr><td colspan="3" class="fm-empty">Empty folder</td></tr>';
       return;
     }
     rows.sort((a, b) => {
@@ -701,7 +713,7 @@ fm.load = async function(rel) {
   } catch (e) {
     fmStatus.textContent = 'Could not list directory: ' + e.message;
     fmStatus.className = 'fm-status error';
-    fmBody.innerHTML = '<tr><td colspan="2" class="fm-empty">—</td></tr>';
+    fmBody.innerHTML = '<tr><td colspan="3" class="fm-empty">—</td></tr>';
   } finally {
     fm.busy = false;
   }

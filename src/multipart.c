@@ -11,6 +11,7 @@
 #define UPLOAD_DIR "sdmc:/switch/uploads"
 #define MAX_FILENAME 256
 
+
 static int extract_quoted(const char *hay, const char *key, char *out, size_t outsz){
     const char *p = strstr(hay, key);
     if (!p) return -1;
@@ -85,6 +86,15 @@ static int mp_process_headers(MultipartParser *mp){
     char fname[MAX_FILENAME];
     if (extract_quoted(mp->hdr, "filename=", fname, sizeof(fname)) == 0 && fname[0]){
         sanitize_filename(fname);
+
+        int slot = -1;
+        if (mp->files_attempted < MAX_PART_LOG){
+            slot = mp->files_attempted;
+            snprintf(mp->parts[slot].name, MAX_PART_NAME, "%s", fname);
+            mp->parts[slot].ok = 0;
+        }
+        mp->files_attempted++;
+
         char dir[520];
         if (mp->dest_dir[0]){
             snprintf(dir, sizeof(dir), "sdmc:/%s", mp->dest_dir);
@@ -97,12 +107,15 @@ static int mp_process_headers(MultipartParser *mp){
             mp->out = NULL;
             return 0;
         }
-        snprintf(path, sizeof(path), "%s/%s", dir, fname);
         FILE *f = fopen(path, "wb");
+
         if (!f){
             mp->out = NULL;
             return 0;
         }
+
+        if (slot >= 0) mp->parts[slot].ok = 1;
+
         mp->out = f;
         strncpy(mp->out_path, path, sizeof(mp->out_path) - 1);
         mp->out_path[sizeof(mp->out_path) - 1] = 0;
@@ -208,7 +221,7 @@ int mp_feed(MultipartParser *mp, const char *chunk, int chunk_len){
                     return 0;
                 } else if (pos + 1 < wlen && window[pos] == '\r' && window[pos + 1] == '\n'){
                     pos += 2;
-                    mp->state = PS_PREAMBLE;
+                    mp->state = PS_HEADERS;
                     mp->hdr_len = 0;
                 } else if (pos == wlen || pos + 1 == wlen){
                     int keep = wlen - pos;

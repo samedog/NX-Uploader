@@ -57,7 +57,7 @@ static void send_str(int fd, const char *s){
 
 // Locates the value of an HTTP header. Header names are matched
 // case-insensitively. Returns a pointer into `headers` (not
-// NUL-terminated at the value boundary — use copy_header_value for
+// NUL-terminated at the value boundary, use copy_header_value for
 // a clean string), or NULL if the header isn't present.
 static const char *find_header(const char *headers, const char *name){
     size_t nlen = strlen(name);
@@ -396,7 +396,7 @@ static void handle_client(int fd){
         } else {
             mp_close_file(&mp);
             if (mp.files_saved > 0){
-                g.uploads++;
+                g.uploads += mp.files_saved;
                 strncpy(g.last_name, g.current_name, sizeof(g.last_name) - 1);
                 g.last_name[sizeof(g.last_name) - 1] = 0;
             }
@@ -406,11 +406,44 @@ static void handle_client(int fd){
         g.uploading = 0;
 
         if (success && mp.files_saved > 0){
-            char resp[256];
-            int rl = snprintf(resp, sizeof(resp),
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
-                "Connection: close\r\n\r\nUploaded %d file(s).\n", mp.files_saved);
-            send_all(fd, resp, (size_t)rl);
+            char body[4096];
+            int bl = 0;
+            #define APPEND(...) do { \
+                if (bl >= 0 && (size_t)bl < sizeof(body)){ \
+                    int _n = snprintf(body + bl, sizeof(body) - bl, __VA_ARGS__); \
+                    if (_n > 0) bl += _n; \
+                } \
+            } while (0)
+
+            APPEND("Uploaded %d of %d file(s).\n",
+                   mp.files_saved, mp.files_attempted);
+
+            int logged = mp.files_attempted < MAX_PART_LOG
+                       ? mp.files_attempted : MAX_PART_LOG;
+            int failed = 0;
+            for (int i = 0; i < logged; i++){
+                if (!mp.parts[i].ok){
+                    if (failed == 0) APPEND("Failed:\n");
+                    APPEND("  %s\n", mp.parts[i].name);
+                    failed++;
+                }
+            }
+            if (mp.files_attempted > MAX_PART_LOG){
+                APPEND("(and %d more, log full)\n",
+                       mp.files_attempted - MAX_PART_LOG);
+            }
+
+            #undef APPEND
+            if (bl < 0) bl = 0;
+            if ((size_t)bl >= sizeof(body)) bl = (int)sizeof(body) - 1;
+            char hdr[256];
+            int hl = snprintf(hdr, sizeof(hdr),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain; charset=utf-8\r\n"
+                "Content-Length: %d\r\n"
+                "Connection: close\r\n\r\n", bl);
+            send_all(fd, hdr, (size_t)hl);
+            send_all(fd, body, (size_t)bl);
         } else if (aborted){
             // client disconnected
         } else {

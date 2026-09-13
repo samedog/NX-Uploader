@@ -24,6 +24,8 @@
 #define LOOKBACK_MAX   256
 #define HEADER_ACCUM_MAX 2048
 #define READ_CHUNK     (64 * 1024)
+#define MAX_PART_LOG 64
+#define MAX_PART_NAME 128
 
 typedef enum {
     PS_PREAMBLE, PS_HEADERS, PS_DATA, PS_SKIP, PS_DONE, PS_ERROR
@@ -77,6 +79,11 @@ typedef struct {
     // mp_abort() knows whether out_path points at a real file worth
     // removing.
     int    opened_a_file;
+    struct {
+        char name[MAX_PART_NAME];
+        int  ok;
+    } parts[MAX_PART_LOG];
+    int files_attempted;
 } MultipartParser;
 
 // Initializes the parser with boundary extracted from the request

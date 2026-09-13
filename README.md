@@ -36,7 +36,9 @@ Also, honestly: why not.
 
 ## Features
 
-- Drag-and-drop upload from any modern browser
+- File manager to browse the sdcard, create folders, and delete files and folders
+- Drag-and-drop uploads from any modern browser
+- Queued multi file uploads
 - Streaming multipart parser, no whole-file buffering, works with files
   larger than the Switch's RAM
 - Live progress bar in the browser, live bytes-received counter and

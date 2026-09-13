@@ -33,8 +33,9 @@ typedef struct {
 
     // --- counters ---
 
-    // Total number of successful uploads since launch. Incremented by
-    // the server thread; read by the UI.
+    // Total number of files successfully uploaded since launch.
+    // Incremented by mp.files_saved after each successful request, so a
+    // multi-file upload bumps this by the number of files that landed.
     volatile int  uploads;
 
     // Filename of the most recently completed upload, for the "Last:"
@@ -65,10 +66,13 @@ typedef struct {
     // moving average. Zero when no upload is in progress.
     volatile long speed_bps;
 
-    // Filename of the current in-flight upload, for the "Receiving:"
-    // line. May be empty during the multipart preamble before the
+    // Filename of the file part currently being written, for the
+    // "Receiving:" line. Updated each time the parser opens a new part,
+    // so during a multi-file upload this cycles through the filenames as
+    // they're written. Empty during the multipart preamble before the
     // first file part's headers have been parsed.
     char          current_name[MAX_FILENAME];
+    
 } AppState;
 
 extern AppState g;
