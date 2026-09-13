@@ -36,7 +36,7 @@ Also, honestly: why not.
 
 ## Features
 
-- File manager to browse the sdcard, create folders, and delete files and folders
+- File manager to browse the sdcard, create folders, and delete files.
 - Drag-and-drop uploads from any modern browser
 - Queued multi file uploads
 - Streaming multipart parser, no whole-file buffering, works with files
@@ -92,6 +92,11 @@ make
 Uploads are written to disk as bytes arrive off the socket. If the
 connection drops before the closing boundary, the partial file is
 deleted. The whole upload is never held in RAM.
+
+## TODO:
+
+- Delete folders
+- Download files from the swtich to the pc
 
 ## License
 
