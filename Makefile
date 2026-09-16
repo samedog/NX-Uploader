@@ -10,13 +10,13 @@ TOPDIR ?= $(CURDIR)
 
 APP_TITLE   := NX Uploader
 APP_AUTHOR  := The Samedog
-APP_VERSION := 2.1.0
+APP_VERSION := 2.2.0
 APP_ICON    := $(TOPDIR)/icon.jpg
 
 TARGET   := NXUploader
 BUILD    := build
 SOURCES  := src
-INCLUDES := src
+INCLUDES := includes
 
 HTML_SRC := web/index.html
 HTML_GEN := src/html_data.c

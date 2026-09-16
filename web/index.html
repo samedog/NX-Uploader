@@ -368,6 +368,28 @@ button:disabled{
 .fm-new{
   flex: 0 0 auto;
 }
+.fm-dl{
+  display: inline-block;
+  margin: 0 4px 0 0;
+  padding: 4px 8px;
+  border: 1px solid #1e2a3a;
+  border-radius: 6px;
+  background: #141a24;
+  color: #7ab8ff;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
+  vertical-align: middle;
+}
+.fm-row:hover .fm-dl{ opacity: 1; }
+.fm-dl:hover{ background: #1a2333; color: #a8ceff; }
+@media (hover: none){
+  .fm-dl{ opacity: 1; }
+}
+.fm-act-col{ width: 86px; }   /* was 52px */
 </style>
 </head>
 
@@ -689,24 +711,38 @@ fm.load = async function(rel) {
 
       const tr = document.createElement('tr');
       tr.className = 'fm-row';
+      const dlHref = isDir ? '' :
+        ('/dl?path=' + encodeURIComponent(fm.cwd ? fm.cwd + '/' + name : name));
+
       tr.innerHTML =
         '<td><div class="fm-name">' +
           '<span class="fm-ico">' + (isDir ? '&#128193;' : '&#128196;') + '</span>' +
           '<span></span>' +
         '</div></td>' +
         '<td class="fm-size">' + (isDir ? '' : formatBytes(size)) + '</td>' +
-        '<td><button class="fm-del" type="button" title="Delete">&#10005;</button></td>';
+        '<td>' +
+          (isDir ? '' :
+            '<a class="fm-dl" href="' + dlHref + '" download title="Download">&#11015;</a>') +
+          '<button class="fm-del" type="button" title="Delete">&#10005;</button>' +
+        '</td>';
       tr.querySelector('.fm-name span:last-child').textContent = name;
+
+      const dlLink = tr.querySelector('.fm-dl');
+      if (dlLink){
+        // Stop the row's navigate handler from firing.
+        dlLink.addEventListener('click', (e) => e.stopPropagation());
+      }
 
       const delBtn = tr.querySelector('.fm-del');
       delBtn.onclick = (e) => {
-        e.stopPropagation();   // don't trigger the row's navigate handler
+        e.stopPropagation();
         fm.delete(name, isDir);
       };
 
-      if (isDir) {
+      if (isDir){
         tr.onclick = () => fm.load(fm.cwd ? fm.cwd + '/' + name : name);
       }
+
       fmBody.appendChild(tr);
     }
 

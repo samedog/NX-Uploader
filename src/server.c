@@ -124,6 +124,97 @@ static int extract_token(const char *hay, const char *key, char *out, size_t out
     return (i > 0) ? 0 : -1;
 }
 
+// URL-decodes %XX sequences in place. "+" is NOT converted to space because of 
+// encodeURIComponent.
+static void url_decode(char *s){
+    char *r = s, *w = s;
+    while (*r){
+        if (*r == '%' && r[1] && r[2]){
+            int hi = r[1] >= '0' && r[1] <= '9' ? r[1] - '0'
+                   : r[1] >= 'a' && r[1] <= 'f' ? r[1] - 'a' + 10
+                   : r[1] >= 'A' && r[1] <= 'F' ? r[1] - 'A' + 10 : -1;
+            int lo = r[2] >= '0' && r[2] <= '9' ? r[2] - '0'
+                   : r[2] >= 'a' && r[2] <= 'f' ? r[2] - 'a' + 10
+                   : r[2] >= 'A' && r[2] <= 'F' ? r[2] - 'A' + 10 : -1;
+            if (hi < 0 || lo < 0){
+                *w++ = *r++;
+                continue;
+            }
+            *w++ = (char)((hi << 4) | lo);
+            r += 3;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = 0;
+}
+
+
+// Handles GET /dl?path=<url-encoded-rel>. Streams the file back to the client.
+static void handle_download(int fd, const char *query){
+    if (strncmp(query, "path=", 5) != 0){
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                     "Connection: close\r\n\r\nmissing path\n");
+        return;
+    }
+
+    char rel[512];
+    snprintf(rel, sizeof(rel), "%s", query + 5);
+    url_decode(rel);
+
+    char full[768];
+    long long size = 0;
+    if (stat_file(rel, full, sizeof(full), &size) < 0){
+        send_str(fd, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                     "Connection: close\r\n\r\nfile not found\n");
+        return;
+    }
+
+    FILE *f = fopen(full, "rb");
+    if (!f){
+        send_str(fd, "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                     "Connection: close\r\n\r\ncannot open file\n");
+        return;
+    }
+
+    const char *base = strrchr(full, '/');
+    base = base ? base + 1 : full;
+
+    // Filename escaping: strip anything that would break header syntax.
+    // exFAT forbids these in real filenames but just in case.
+    char safe_name[256];
+    size_t si = 0;
+    for (const char *p = base; *p && si < sizeof(safe_name) - 1; p++){
+        if (*p == '"' || *p == '\\' || (unsigned char)*p < 32) safe_name[si++] = '_';
+        else safe_name[si++] = *p;
+    }
+    safe_name[si] = 0;
+
+    char hdr[512];
+    int hl = snprintf(hdr, sizeof(hdr),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/octet-stream\r\n"
+        "Content-Disposition: attachment; filename=\"%s\"\r\n"
+        "Content-Length: %lld\r\n"
+        "Connection: close\r\n\r\n",
+        safe_name, size);
+    send_all(fd, hdr, (size_t)hl);
+
+    char *buf = malloc(READ_CHUNK);
+    if (!buf){
+        fclose(f);
+        return;
+    }
+
+    size_t n;
+    while ((n = fread(buf, 1, READ_CHUNK, f)) > 0){
+        if (send_all(fd, buf, n) != 0) break;
+    }
+
+    free(buf);
+    fclose(f);
+}
+
 // Handles a single HTTP request end-to-end.
 //
 // Order matters:
@@ -158,6 +249,13 @@ static void handle_client(int fd){
     sscanf(headers, "%15s %255s", method, path);
 
     if (strcmp(method, "GET") == 0){
+        // GET /dl?path=<url-encoded relative path> streams a file.
+        if (strncmp(path, "/dl?", 4) == 0){
+            handle_download(fd, path + 4);
+            return;
+        }
+
+        // Everything else: serve the UI.
         char hdr[256];
         int n = snprintf(hdr, sizeof(hdr),
             "HTTP/1.1 200 OK\r\n"
@@ -474,6 +572,8 @@ static int open_listener(void){
     if (listen(s, 4) < 0){ close(s); return -1; }
     return s;
 }
+
+
 
 void server_thread(void *arg){
     (void)arg;

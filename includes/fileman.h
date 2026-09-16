@@ -25,4 +25,9 @@ int delete_path(const char *rel);
 // Returns 0 on success, -1 on error (parent missing, already exists, escapes root).
 int make_dir(const char *rel);
 
+// Resolves rel, stats it, and returns the file size in bytes via *out_size.
+// full_out receives the resolved absolute path so  the caller can fopen() it.
+// Returns 0 on success, -1 on error (It omits dirs).
+int stat_file(const char *rel, char *full_out, size_t full_sz, long long *out_size);
+
 #endif /* FILEMAN_H */

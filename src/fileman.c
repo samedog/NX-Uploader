@@ -105,3 +105,17 @@ int make_dir(const char *rel){
     // mkdir with mode 0777 — exFAT ignores the mode, but newlib wants an arg.
     return mkdir(full, 0777) == 0 ? 0 : -1;
 }
+
+int stat_file(const char *rel, char *full_out, size_t full_sz, long long *out_size){
+    if (!rel || !rel[0]) return -1;
+
+    if (join_and_check(rel, full_out, full_sz) < 0)
+        return -1;
+
+    struct stat st;
+    if (stat(full_out, &st) != 0) return -1;
+    if (S_ISDIR(st.st_mode)) return -1;
+
+    *out_size = (long long)st.st_size;
+    return 0;
+}
