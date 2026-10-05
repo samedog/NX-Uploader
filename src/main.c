@@ -6,12 +6,12 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 #include "app_state.h"
+#include "config.h"
 #include "net_info.h"
 #include "server.h"
-
-#define UPLOAD_DIR "sdmc:/switch/uploads"
-#define PORT 8080
+#include "storage.h"
 
 AppState g;
 
@@ -31,6 +31,21 @@ static void format_speed(long bps, char *out, size_t outsz){
     } else {
         unit = "GB/s"; value = (double)bps / (1024.0 * 1024.0 * 1024.0);
     }
+    if (value < 10.0) snprintf(out, outsz, "%.2f %s", value, unit);
+    else              snprintf(out, outsz, "%.1f %s", value, unit);
+}
+
+// Formats a byte count as a human-readable string. Shows "unknown" when
+// the value is negative, which is what storage_free_bytes() returns when
+// the card could not be read.
+static void format_size(long long bytes, char *out, size_t outsz){
+    if (bytes < 0){ snprintf(out, outsz, "unknown"); return; }
+    const char *unit;
+    double value;
+    if (bytes < 1024){ unit = "B"; value = (double)bytes; }
+    else if (bytes < 1024LL * 1024){ unit = "KB"; value = (double)bytes / 1024.0; }
+    else if (bytes < 1024LL * 1024 * 1024){ unit = "MB"; value = (double)bytes / (1024.0 * 1024.0); }
+    else { unit = "GB"; value = (double)bytes / (1024.0 * 1024.0 * 1024.0); }
     if (value < 10.0) snprintf(out, outsz, "%.2f %s", value, unit);
     else              snprintf(out, outsz, "%.1f %s", value, unit);
 }
@@ -76,13 +91,16 @@ static void draw_ui(void){
 
     if (strcmp(g_ip, "0.0.0.0") == 0){
         printf("\x1b[4;2H\x1b[31mOffline \x1b[0m- connect to Wi-Fi or Ethernet");
-        printf("\x1b[5;2HServer is listening on :%d anyway", PORT);
+        printf("\x1b[5;2HServer is listening on :%d anyway", g.port);
     } else {
-        printf("\x1b[4;2H\x1b[32mhttp://%s:%d\x1b[0m", g_ip, PORT);
+        printf("\x1b[4;2H\x1b[32mhttp://%s:%d\x1b[0m", g_ip, g.port);
         printf("\x1b[5;2HOpen that URL from a browser on your LAN");
     }
 
-    printf("\x1b[7;2HStatus:   %s", g.status);
+    if (!g.running && !g.stop_requested)
+        printf("\x1b[7;2H\x1b[31mServer stopped: %s\x1b[0m", g.status);
+    else
+        printf("\x1b[7;2HStatus:   %s", g.status);
     printf("\x1b[8;2HUploads:  %d", g.uploads);
 
     if (g.uploading && g.bytes_expected > 0){
@@ -114,7 +132,14 @@ static void draw_ui(void){
         printf("\x1b[10;2H");
         printf("\x1b[11;2H");
     }
-    printf("\x1b[13;2HFiles land in %s", UPLOAD_DIR);
+    char frees[32];
+    format_size(g.free_bytes, frees, sizeof(frees));
+    printf("\x1b[12;2HFree:     %s", frees);
+    printf("\x1b[13;2HRoot:     %s", cfg_root);
+    if (cfg_read_only)
+        printf("\x1b[14;2H\x1b[33mRead-only mode\x1b[0m");
+    else if (cfg_auth_header[0])
+        printf("\x1b[14;2HAuth:     on");
     printf("\x1b[15;2HPress + to stop and exit");
     consoleUpdate(NULL);
 }
@@ -124,6 +149,7 @@ int main(int argc, char **argv){
 
     consoleInit(NULL);
     socketInitializeDefault();
+    config_load();
     appletSetAutoSleepDisabled(true);
     detect_local_ip();
 
@@ -131,14 +157,25 @@ int main(int argc, char **argv){
     PadState pad;
     padInitializeDefault(&pad);
 
-    if (mkdir(UPLOAD_DIR, 0777) != 0) {
-        strcpy(g.status, "Failed to create uploads dir");
-    }
-
+    // Zero the shared state before anything writes to it. The mkdir check
+    // below writes g.status on failure, so it has to run after the memset
+    // or the message would be wiped right back out.
     memset(&g, 0, sizeof(g));
     g.running = 1;
+    g.port = cfg_port;
+    g.free_bytes = storage_free_bytes();
     strcpy(g.status, "Starting...");
     strcpy(g.last_name, "(none)");
+
+    // Best effort: make sure the default upload dir exists. A narrowed root
+    // is expected to already exist on the card. Failures are not fatal; an
+    // upload reports the problem per request.
+    if (mkdir(cfg_upload_dir, 0777) != 0 && errno != EEXIST) {
+        strcpy(g.status, "Cannot create upload dir");
+    }
+    if (strcmp(cfg_root, "sdmc:/") != 0) {
+        mkdir(cfg_root, 0777);
+    }
 
     draw_ui();
 
@@ -154,10 +191,15 @@ int main(int argc, char **argv){
         }
 
         static u64 last_ip_check = 0;
+        static u64 last_free_check = 0;
         u64 now = armGetSystemTick();
         if (now - last_ip_check > armGetSystemTickFreq()){
             detect_local_ip();
             last_ip_check = now;
+        }
+        if (now - last_free_check > armGetSystemTickFreq() * 2){
+            g.free_bytes = storage_free_bytes();
+            last_free_check = now;
         }
 
         draw_ui();

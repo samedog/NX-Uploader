@@ -25,7 +25,7 @@
 #define HEADER_ACCUM_MAX 2048
 #define READ_CHUNK     (64 * 1024)
 #define MAX_PART_LOG 64
-#define MAX_PART_NAME 128
+#define MAX_PART_NAME 256
 
 typedef enum {
     PS_PREAMBLE, PS_HEADERS, PS_DATA, PS_SKIP, PS_DONE, PS_ERROR
@@ -34,12 +34,10 @@ typedef enum {
 typedef struct {
     // --- caller-settable ---
 
-    // Destination directory for uploaded files, relative to sdmc:/.
-    // E.g. "switch/roms/gba". Empty string means fall back to the
-    // compiled-in default (UPLOAD_DIR). Set between mp_init() and the
-    // first mp_feed() call. Not validated here; the caller is
-    // responsible for rejecting paths containing "..", ":", "\\", or a
-    // leading "/".
+    // Absolute destination directory for uploaded files, for example
+    // "sdmc:/switch/roms/gba". The caller resolves and validates it before
+    // the first mp_feed() call; the parser does not check it. Set between
+    // mp_init() and the first mp_feed().
     char   dest_dir[512];
 
     // --- parser state (read-only to callers) ---
@@ -67,9 +65,16 @@ typedef struct {
     // Currently open output file, or NULL between parts.
     FILE  *out;
 
-    // Path of the file currently being written. Used by mp_abort() to
-    // delete a partial file when the connection drops mid-upload.
-    char   out_path[512];
+    // Path of the temporary file currently being written. Parts stream
+    // into "<dir>/.<name>.<seq>.part" and are renamed onto final_path only
+    // once the part completes, so a partial or cancelled upload never
+    // appears under the real name. Used by mp_abort() to delete the
+    // partial.
+    char   out_path[1024];
+
+    // Destination the temp file is renamed to when a part completes
+    // cleanly. Set alongside out_path when a part is opened.
+    char   final_path[1024];
 
     // Number of file parts fully written. A successful upload has this
     // > 0 and state == PS_DONE.
@@ -79,9 +84,16 @@ typedef struct {
     // mp_abort() knows whether out_path points at a real file worth
     // removing.
     int    opened_a_file;
+
+    // Index into parts[] for the part currently being written, or -1 when
+    // no file is open. mp_close_file() flips parts[cur_slot].ok to 1 only
+    // after the file is flushed and renamed, so a failed commit is
+    // reported as a failed file instead of a silent success.
+    int    cur_slot;
     struct {
         char name[MAX_PART_NAME];
         int  ok;
+        int  err;   // errno when ok == 0, or 0 when the reason is unknown
     } parts[MAX_PART_LOG];
     int files_attempted;
 } MultipartParser;
@@ -102,11 +114,15 @@ void mp_init(MultipartParser *mp, const char *boundary);
 // upload is incomplete or malformed and should call mp_abort().
 int  mp_feed(MultipartParser *mp, const char *chunk, int chunk_len);
 
-// Flushes and closes the current file, incrementing files_saved.
-// Safe to call when no file is open (no-op). Called automatically by
-// mp_feed() at each part boundary; callers only need this to explicitly
-// finalize after PS_DONE is reached.
-void mp_close_file(MultipartParser *mp);
+// Flushes, closes, and commits the current file. Returns 0 on success, or
+// -1 if any step failed, in which case the partial temp file is removed
+// and the part stays marked as failed. Safe to call with no file open, in
+// which case it is a no-op returning 0.
+//
+// The bytes were written to a temp path and are renamed onto final_path
+// only here, so a partial upload never appears under the real name and an
+// interrupted overwrite leaves the original file untouched.
+int  mp_close_file(MultipartParser *mp);
 
 // Closes the current file and deletes it from disk when the upload fails 
 // or the connection drops: the parser has already written the partial 

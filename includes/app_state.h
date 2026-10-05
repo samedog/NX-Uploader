@@ -26,6 +26,11 @@ typedef struct {
     // (on bind failure or after a clean shutdown). Read by the UI.
     volatile int  running;
 
+    // TCP port the server actually bound. May differ from NXU_PORT if the
+    // default was already taken. Written once by the server thread after
+    // listen() succeeds; the UI shows it as the URL.
+    volatile int  port;
+
     // Set to 1 by the main loop when the user presses "+". The server
     // thread polls this in its select() loop and exits when set.
     // Write-once; never cleared.
@@ -65,6 +70,10 @@ typedef struct {
     // Smoothed transfer rate in bytes/sec, updated by draw_ui() as a
     // moving average. Zero when no upload is in progress.
     volatile long speed_bps;
+
+    // Last sampled free space on sdmc:/ in bytes, or -1 if unknown.
+    // Written by the main loop every couple of seconds for the UI.
+    volatile long long free_bytes;
 
     // Filename of the file part currently being written, for the
     // "Receiving:" line. Updated each time the parser opens a new part,

@@ -21,8 +21,8 @@
 
 #include <switch.h>
 #include <arpa/inet.h>
-#include <errno.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,12 +30,13 @@
 #include <unistd.h>
 #include <sys/select.h>
 #include "app_state.h"
+#include "config.h"
 #include "html.h"
 #include "multipart.h"
 #include "fileman.h"
+#include "storage.h"
 #include "server.h"
 
-#define PORT        8080
 #define MAX_HEADERS 8192
 #define MAX_UPLOAD_BYTES (32LL * 1024 * 1024 * 1024)
 
@@ -53,6 +54,29 @@ static int send_all(int fd, const void *buf, size_t len){
 
 static void send_str(int fd, const char *s){
     send_all(fd, s, strlen(s));
+}
+
+// Appends one line per request when logging is turned on in the config file.
+// Best effort: a failed open or write is ignored.
+static void log_request(const char *method, const char *path){
+    if (!cfg_log) return;
+    FILE *f = fopen(NXU_LOG_PATH, "a");
+    if (!f) return;
+    fprintf(f, "%s %s\n", method, path);
+    fclose(f);
+}
+
+// Reads and discards up to `remaining` bytes from the socket. Used to
+// swallow a body we are about to reject, so the client does not see the
+// connection drop mid-write.
+static void drain_body(int fd, long long remaining){
+    char sink[8192];
+    while (remaining > 0){
+        size_t want = remaining < (long long)sizeof(sink) ? (size_t)remaining : sizeof(sink);
+        ssize_t n = recv(fd, sink, want, 0);
+        if (n <= 0) break;
+        remaining -= n;
+    }
 }
 
 // Locates the value of an HTTP header. Header names are matched
@@ -150,8 +174,9 @@ static void url_decode(char *s){
 }
 
 
-// Handles GET /dl?path=<url-encoded-rel>. Streams the file back to the client.
-static void handle_download(int fd, const char *query){
+// Handles GET /dl?path=<url-encoded-rel> (and HEAD). Streams the file back
+// to the client, or just the headers when head_only is set.
+static void handle_download(int fd, const char *query, int head_only){
     if (strncmp(query, "path=", 5) != 0){
         send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
                      "Connection: close\r\n\r\nmissing path\n");
@@ -199,6 +224,11 @@ static void handle_download(int fd, const char *query){
         "Connection: close\r\n\r\n",
         safe_name, size);
     send_all(fd, hdr, (size_t)hl);
+
+    if (head_only){
+        fclose(f);
+        return;
+    }
 
     char *buf = malloc(READ_CHUNK);
     if (!buf){
@@ -248,10 +278,49 @@ static void handle_client(int fd){
     char method[16] = {0}, path[256] = {0};
     sscanf(headers, "%15s %255s", method, path);
 
-    if (strcmp(method, "GET") == 0){
-        // GET /dl?path=<url-encoded relative path> streams a file.
+    log_request(method, path);
+
+    // Optional HTTP Basic auth. config_load() precomputes the exact
+    // "Basic <base64>" string, so this is a straight compare. The browser
+    // prompts natively on the 401 for the page load and then reuses the
+    // credentials on its later same-origin requests.
+    if (cfg_auth_header[0]){
+        char auth[320] = {0};
+        int ok = (copy_header_value(headers, "Authorization", auth, sizeof(auth)) == 0)
+                 && strcmp(auth, cfg_auth_header) == 0;
+        if (!ok){
+            if (strcmp(method, "POST") == 0){
+                char cl[32];
+                if (copy_header_value(headers, "Content-Length", cl, sizeof(cl)) == 0){
+                    long long clen = atoll(cl);
+                    size_t already = (size_t)(got - (hdr_end + 4 - req));
+                    if (already > (size_t)clen) already = (size_t)clen;
+                    drain_body(fd, clen - (long long)already);
+                }
+            }
+            send_str(fd, "HTTP/1.1 401 Unauthorized\r\n"
+                         "WWW-Authenticate: Basic realm=\"NX Uploader\"\r\n"
+                         "Content-Length: 0\r\n"
+                         "Connection: close\r\n\r\n");
+            return;
+        }
+    }
+
+    int is_head = (strcmp(method, "HEAD") == 0);
+    if (strcmp(method, "GET") == 0 || is_head){
+        // /dl?path=<url-encoded relative path> streams a file. For HEAD we
+        // send the same headers without the body.
         if (strncmp(path, "/dl?", 4) == 0){
-            handle_download(fd, path + 4);
+            handle_download(fd, path + 4, is_head);
+            return;
+        }
+
+        // Browsers probe for a favicon on every load; answer 404 rather
+        // than handing back the whole page.
+        if (strcmp(path, "/favicon.ico") == 0){
+            send_str(fd, "HTTP/1.1 404 Not Found\r\n"
+                         "Content-Length: 0\r\n"
+                         "Connection: close\r\n\r\n");
             return;
         }
 
@@ -264,7 +333,7 @@ static void handle_client(int fd){
             "Connection: close\r\n\r\n",
             strlen(HTML_FORM));
         send_all(fd, hdr, (size_t)n);
-        send_str(fd, HTML_FORM);
+        if (!is_head) send_str(fd, HTML_FORM);
         return;
     }
 
@@ -287,30 +356,19 @@ static void handle_client(int fd){
             if (e && strncasecmp(e, "100-continue", 12) == 0) wants_100 = 1;
         }
 
+        // Bytes of the body that already arrived with the headers. The
+        // drain paths below must not wait for these again.
+        size_t body_already = (size_t)(got - ((hdr_end + 4) - req));
+        if (body_already > (size_t)clen) body_already = (size_t)clen;
+
         if (clen > MAX_UPLOAD_BYTES){
-            if (wants_100){
-                send_str(fd,
-                    "HTTP/1.1 413 Payload Too Large\r\n"
-                    "Content-Type: text/plain\r\n"
-                    "Connection: close\r\n\r\n"
-                    "File exceeds maximum size (32 GiB).\n");
-                return;
-            } else {
-                char sink[8192];
-                long long remaining = clen;
-                while (remaining > 0){
-                    size_t want = remaining < (long long)sizeof(sink) ? (size_t)remaining : sizeof(sink);
-                    ssize_t n = recv(fd, sink, want, 0);
-                    if (n <= 0) break;
-                    remaining -= n;
-                }
-                send_str(fd,
-                    "HTTP/1.1 413 Payload Too Large\r\n"
-                    "Content-Type: text/plain\r\n"
-                    "Connection: close\r\n\r\n"
-                    "File exceeds maximum size.\n");
-                return;
-            }
+            if (!wants_100) drain_body(fd, clen - (long long)body_already);
+            send_str(fd,
+                "HTTP/1.1 413 Payload Too Large\r\n"
+                "Content-Type: text/plain\r\n"
+                "Connection: close\r\n\r\n"
+                "File exceeds maximum size (32 GiB).\n");
+            return;
         }
 
         if (wants_100) send_str(fd, "HTTP/1.1 100 Continue\r\n\r\n");
@@ -377,6 +435,11 @@ static void handle_client(int fd){
             }
 
             if (strcmp(verb, "DEL") == 0){
+                if (cfg_read_only || !cfg_allow_delete){
+                    send_str(fd, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nDelete is disabled.\n");
+                    return;
+                }
                 if (delete_path(arg) == 0){
                     send_str(fd, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
                                  "Connection: close\r\n\r\nok\n");
@@ -389,6 +452,11 @@ static void handle_client(int fd){
 
 
             if (strcmp(verb, "MKDIR") == 0){
+                if (cfg_read_only){
+                    send_str(fd, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nRead-only mode.\n");
+                    return;
+                }
                 if (arg[0] == 0){
                     send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
                                  "Connection: close\r\n\r\nmissing folder name\n");
@@ -401,6 +469,45 @@ static void handle_client(int fd){
                     send_str(fd, "HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\n"
                                  "Connection: close\r\n\r\ncannot create folder\n");
                 }
+                return;
+            }
+
+            if (strcmp(verb, "REN") == 0){
+                if (cfg_read_only){
+                    send_str(fd, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nRead-only mode.\n");
+                    return;
+                }
+                char *tab = strchr(arg, '\t');
+                if (!tab || tab == arg || tab[1] == 0){
+                    send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nmissing rename target\n");
+                    return;
+                }
+                *tab = 0;
+                if (rename_path(arg, tab + 1) == 0){
+                    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nok\n");
+                } else {
+                    send_str(fd, "HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\ncannot rename\n");
+                }
+                return;
+            }
+
+            if (strcmp(verb, "FREE") == 0){
+                long long fb = storage_free_bytes();
+                long long tb = storage_total_bytes();
+                char body[96];
+                int bl = snprintf(body, sizeof(body), "%lld\t%lld\n", fb, tb);
+                char hdr[256];
+                int hl = snprintf(hdr, sizeof(hdr),
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/plain; charset=utf-8\r\n"
+                    "Content-Length: %d\r\n"
+                    "Connection: close\r\n\r\n", bl);
+                send_all(fd, hdr, (size_t)hl);
+                send_all(fd, body, (size_t)bl);
                 return;
             }
 
@@ -426,17 +533,58 @@ static void handle_client(int fd){
         char *body_start = hdr_end + 4;
         size_t already = (size_t)(got - (body_start - req));
         if (already > (size_t)clen) already = (size_t)clen;
-        char upload_dir[512] = {0};
-        copy_header_value(headers, "X-Upload-Dir", upload_dir, sizeof(upload_dir));
 
-        if (upload_dir[0] == '/' || strstr(upload_dir, "..") ||
-            strchr(upload_dir, ':') || strchr(upload_dir, '\\')){
-            upload_dir[0] = 0;
+        if (cfg_read_only){
+            drain_body(fd, clen - (long long)body_already);
+            send_str(fd, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n"
+                         "Connection: close\r\n\r\nRead-only mode: uploads are disabled.\n");
+            return;
+        }
+
+        // Work out the absolute destination. The browser always sends
+        // X-Upload-Dir (the folder it is showing, relative to the root);
+        // scripts may omit it and get cfg_upload_dir instead.
+        char dest_base[512];
+        {
+            char upload_dir[256] = {0};
+            int has_dir = (copy_header_value(headers, "X-Upload-Dir", upload_dir,
+                                             sizeof(upload_dir)) == 0);
+            if (has_dir){
+                // Reject anything that could escape the sandbox.
+                if (upload_dir[0] == '/' || strstr(upload_dir, "..") ||
+                    strchr(upload_dir, ':') || strchr(upload_dir, '\\')){
+                    upload_dir[0] = 0;   // fall back to the root
+                }
+                snprintf(dest_base, sizeof(dest_base), "%s%s", cfg_root, upload_dir);
+                if (make_dirs(upload_dir) != 0){
+                    drain_body(fd, clen - (long long)body_already);
+                    send_str(fd, "HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\n"
+                                 "Connection: close\r\n\r\nCannot create destination folder.\n");
+                    return;
+                }
+            } else {
+                snprintf(dest_base, sizeof(dest_base), "%s", cfg_upload_dir);
+            }
+        }
+
+        // Refuse early when the card cannot possibly hold this body, so we
+        // don't spend minutes pushing bytes straight into a full disk. Only
+        // uploads land here, so a full card never blocks LIST or DEL.
+        {
+            long long freeb = storage_free_bytes();
+            if (freeb >= 0 && clen > freeb){
+                drain_body(fd, clen - (long long)body_already);
+                send_str(fd, "HTTP/1.1 413 Payload Too Large\r\n"
+                             "Content-Type: text/plain\r\n"
+                             "Connection: close\r\n\r\n"
+                             "Not enough space on the SD card.\n");
+                return;
+            }
         }
 
         MultipartParser mp;
         mp_init(&mp, boundary);
-        snprintf(mp.dest_dir, sizeof(mp.dest_dir), "%s", upload_dir);
+        snprintf(mp.dest_dir, sizeof(mp.dest_dir), "%s", dest_base);
         char *buf = malloc(READ_CHUNK);
         if (!buf){
             send_str(fd, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n"
@@ -450,24 +598,17 @@ static void handle_client(int fd){
         g.current_name[0] = 0;
         g.speed_bps = 0;
 
-        long long processed = 0;
+        long long processed = (long long)already;   // body bytes read off the socket
+        int parse_error = 0;
+        int aborted = 0;
 
         if (already > 0){
-            if (mp_feed(&mp, body_start, (int)already) != 0){
-                mp_abort(&mp);
-                free(buf);
-                g.uploading = 0;
-                send_str(fd, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n"
-                             "Connection: close\r\n\r\nParser error.\n");
-                return;
-            }
-            processed += already;
+            if (mp_feed(&mp, body_start, (int)already) != 0)
+                parse_error = 1;
             g.bytes_received = (long)processed;
         }
 
-
-        int aborted = 0;
-        while (processed < clen){
+        while (!parse_error && processed < clen){
             long long remaining = clen - processed;
             size_t want = remaining < READ_CHUNK ? (size_t)remaining : READ_CHUNK;
 
@@ -476,22 +617,22 @@ static void handle_client(int fd){
                 aborted = 1;
                 break;
             }
-            if (mp_feed(&mp, buf, (int)n) != 0){
-                aborted = 1;
-                break;
-            }
             processed += n;
             g.bytes_received = (long)processed;
+
+            if (mp_feed(&mp, buf, (int)n) != 0){
+                parse_error = 1;
+                break;
+            }
         }
 
-        int success = 0;
-        if (!aborted && mp.state == PS_DONE){
-            success = 1;
-        }
+        int success = (!parse_error && !aborted && mp.state == PS_DONE);
 
         if (!success){
             mp_abort(&mp);
         } else {
+            // Commits the final part. A failure here is already recorded in
+            // mp.parts[].ok, so the response body reports that file as failed.
             mp_close_file(&mp);
             if (mp.files_saved > 0){
                 g.uploads += mp.files_saved;
@@ -503,7 +644,28 @@ static void handle_client(int fd){
         free(buf);
         g.uploading = 0;
 
-        if (success && mp.files_saved > 0){
+        if (parse_error){
+            // The parser rejected the body: a bad boundary, or a part that
+            // could not be committed. Drain what is left and answer, so the
+            // browser shows a real message instead of a connection error.
+            drain_body(fd, clen - processed);
+            send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                         "Connection: close\r\n\r\nUpload failed: the file could not be saved.\n");
+            return;
+        }
+        if (aborted){
+            // The client disconnected mid-body. There is no one to answer.
+            return;
+        }
+        if (!success){
+            send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
+                         "Connection: close\r\n\r\nUpload failed: incomplete request.\n");
+            return;
+        }
+
+        // Parsed to completion. Report the tally, listing any files that did
+        // not land, and pick the status from how many actually saved.
+        {
             char body[4096];
             int bl = 0;
             #define APPEND(...) do { \
@@ -522,7 +684,11 @@ static void handle_client(int fd){
             for (int i = 0; i < logged; i++){
                 if (!mp.parts[i].ok){
                     if (failed == 0) APPEND("Failed:\n");
-                    APPEND("  %s\n", mp.parts[i].name);
+                    if (mp.parts[i].err)
+                        APPEND("  %s: %s\n", mp.parts[i].name,
+                               strerror(mp.parts[i].err));
+                    else
+                        APPEND("  %s: not saved\n", mp.parts[i].name);
                     failed++;
                 }
             }
@@ -536,17 +702,13 @@ static void handle_client(int fd){
             if ((size_t)bl >= sizeof(body)) bl = (int)sizeof(body) - 1;
             char hdr[256];
             int hl = snprintf(hdr, sizeof(hdr),
-                "HTTP/1.1 200 OK\r\n"
+                "HTTP/1.1 %s\r\n"
                 "Content-Type: text/plain; charset=utf-8\r\n"
                 "Content-Length: %d\r\n"
-                "Connection: close\r\n\r\n", bl);
+                "Connection: close\r\n\r\n",
+                mp.files_saved > 0 ? "200 OK" : "400 Bad Request", bl);
             send_all(fd, hdr, (size_t)hl);
             send_all(fd, body, (size_t)bl);
-        } else if (aborted){
-            // client disconnected
-        } else {
-            send_str(fd, "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n"
-                         "Connection: close\r\n\r\nUpload failed.\n");
         }
         return;
     }
@@ -555,22 +717,31 @@ static void handle_client(int fd){
 }
 
 
-static int open_listener(void){
-    int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) return -1;
+// Binds the first free port in [NXU_PORT, NXU_PORT + 3] and reports which
+// one it got via *out_port. Returns the listening socket, or -1 if every
+// candidate was taken.
+static int open_listener(int *out_port){
+    for (int i = 0; i < 4; i++){
+        int port = cfg_port + i;
+        int s = socket(AF_INET, SOCK_STREAM, 0);
+        if (s < 0) continue;
 
-    int one = 1;
-    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        int one = 1;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof(a));
-    a.sin_family = AF_INET;
-    a.sin_port = htons(PORT);
-    a.sin_addr.s_addr = INADDR_ANY;
+        struct sockaddr_in a;
+        memset(&a, 0, sizeof(a));
+        a.sin_family = AF_INET;
+        a.sin_port = htons(port);
+        a.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(s, (struct sockaddr*)&a, sizeof(a)) < 0){ close(s); return -1; }
-    if (listen(s, 4) < 0){ close(s); return -1; }
-    return s;
+        if (bind(s, (struct sockaddr*)&a, sizeof(a)) == 0 && listen(s, 4) == 0){
+            if (out_port) *out_port = port;
+            return s;
+        }
+        close(s);
+    }
+    return -1;
 }
 
 
@@ -578,14 +749,17 @@ static int open_listener(void){
 void server_thread(void *arg){
     (void)arg;
 
-    int ls = open_listener();
+    int port = cfg_port;
+    int ls = open_listener(&port);
     if (ls < 0){
-        snprintf(g.status, sizeof(g.status), "bind() failed: %s", strerror(errno));
+        snprintf(g.status, sizeof(g.status),
+                 "bind() failed on ports %d..%d", cfg_port, cfg_port + 3);
         g.running = 0;
         return;
     }
 
-    snprintf(g.status, sizeof(g.status), "Listening on :%d", PORT);
+    g.port = port;
+    snprintf(g.status, sizeof(g.status), "Listening on :%d", port);
 
     while (!g.stop_requested){
         fd_set rf;
@@ -600,8 +774,18 @@ void server_thread(void *arg){
         socklen_t plen = sizeof(peer);
         int c = accept(ls, (struct sockaddr*)&peer, &plen);
         if (c < 0) continue;
+
+        // Bound both directions so a stalled peer can never pin the only
+        // server thread forever. Without SO_SNDTIMEO a client that stops
+        // reading a download blocks send() indefinitely.
         struct timeval rcvto = { .tv_sec = 30, .tv_usec = 0 };
         setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &rcvto, sizeof(rcvto));
+        struct timeval sndto = { .tv_sec = 30, .tv_usec = 0 };
+        setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &sndto, sizeof(sndto));
+
+        int one = 1;
+        setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        setsockopt(c, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
 
         handle_client(c);
         close(c);

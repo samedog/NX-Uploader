@@ -36,15 +36,25 @@ Also, honestly: why not.
 
 ## Features
 
-- File manager to browse the sdcard, create folders, and delete files.
+- File manager to browse the sdcard, create folders, rename or move
+  entries, and delete files or whole folders
 - Drag-and-drop uploads from any modern browser
 - Queued multi file uploads
+- Folder upload: drop or pick a directory tree, and subfolders are created
+  on the fly
+- Optional "upload to sdmc:/switch instead" toggle, a one-tap shortcut for
+  dropping a `.nro` where hbmenu will find it
 - File downloads from switch to client.
 - Streaming multipart parser, no whole-file buffering, works with files
   larger than the Switch's RAM
 - Live progress bar in the browser, live bytes-received counter and
   transfer speed on the Switch screen
+- Free-space readout on the Switch screen and in the browser, with an
+  early refusal when an upload will not fit
+- Overwrite prompt in the browser before an existing name is replaced
 - Cancel button that actually stops the upload and deletes the partial file
+- Optional config file for port, sandbox root, read-only mode, and
+  HTTP Basic auth
 - No dependencies beyond libnx
 - Single `.nro`, ~300 KB
 - Web UI is a single `web/index.html` embedded into the binary at build
@@ -62,12 +72,35 @@ Also, honestly: why not.
 3. The console shows a URL like `http://192.168.1.10:8080`. Open it in
    any browser on the same network.
 4. Drag a file onto the page, click Upload.
-5. Files land in `sdmc:/switch/uploads/`.
+5. Files land in the folder the file manager is showing (the SD card root
+   by default).
 
 Press **+** on the Switch to stop the server and exit.
 
 The upload limit is 32 GiB per file. That's arbitrary and can be raised
 in `src/server.c` (`MAX_UPLOAD_BYTES`) if you have a reason to.
+
+## Configuration
+
+Everything works with no config file. To change the defaults, drop a file
+at `sdmc:/switch/nxuploader.cfg`. Every key is optional, lines are
+`key=value`, and `#` starts a comment.
+
+```ini
+port=8080                         # base port, fallbacks try 8081..8083
+root=sdmc:/                       # sandbox base for browse, delete, mkdir, rename
+upload_dir=sdmc:/switch/uploads   # used only when a request has no
+                                  # X-Upload-Dir header (scripts, not the browser)
+read_only=0                       # 1 disables uploads, delete, mkdir, and rename
+allow_delete=1                    # 0 disables delete and rename
+auth_user=                        # set both auth_user and auth_pass to
+auth_pass=                        # require HTTP Basic auth (the browser prompts)
+log=0                             # 1 appends each request to
+                                  # sdmc:/switch/nxuploader.log
+```
+
+With a narrower `root`, the file manager cannot see or touch anything
+outside it.
 
 ## Building
 
@@ -80,15 +113,29 @@ cd NX-Uploader
 make
 ```
 
+The host-side unit tests cover the multipart parser, the file manager, and
+the config parser. They build with your normal system compiler, so no
+devkit setup is needed to run them:
+
+```sh
+make test
+```
+
 ## How it works
 
-- `src/main.c` — applet loop, console rendering, entry point
-- `src/server.c` — socket setup, HTTP parsing, `GET` and `POST`
-- `src/multipart.c` — streaming multipart parser with a 256-byte lookback
+- `src/main.c`: applet loop, console rendering, entry point
+- `src/server.c`: socket setup, HTTP parsing, `GET` and `POST`
+- `src/multipart.c`: streaming multipart parser with a 256-byte lookback
   so boundaries straddling chunk edges aren't missed
-- `src/net_info.c` — local IP detection
-- `web/index.html` — the browser UI, embedded at build time
-- `Makefile` — generates `src/html_data.c` from `web/index.html`
+- `src/fileman.c`: sandboxed browse, list, delete, mkdir, and rename
+- `src/storage.c`: SD free and total space
+- `src/config.c`: optional config file loader
+- `src/net_info.c`: local IP detection
+- `web/index.html`: the browser UI, embedded at build time
+- `Makefile`: generates `src/html_data.c` from `web/index.html`
+- `tests/`: host-side unit tests for the parser, file manager, and config
+- `.github/workflows/build.yml`: CI that builds the `.nro` and, on a tag,
+  attaches it to a release
 
 Uploads are written to disk as bytes arrive off the socket. If the
 connection drops before the closing boundary, the partial file is
@@ -96,8 +143,10 @@ deleted. The whole upload is never held in RAM.
 
 ## TODO:
 
-- Delete folders
-- Download files from the swtich to the pc
+- HTTP keep-alive, so the file manager does not open a new TCP connection
+  for every listing
+- Per-file progress in the upload queue
+- Sort and filter in the file manager
 
 ## License
 

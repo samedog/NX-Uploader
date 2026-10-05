@@ -3,14 +3,16 @@
 #---------------------------------------------------------------------------------
 
 ifeq ($(strip $(DEVKITPRO)),)
+ifeq ($(filter test,$(MAKECMDGOALS)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitpro")
+endif
 endif
 
 TOPDIR ?= $(CURDIR)
 
 APP_TITLE   := NX Uploader
 APP_AUTHOR  := The Samedog
-APP_VERSION := 2.2.0
+APP_VERSION := 2.5.0
 APP_ICON    := $(TOPDIR)/icon.jpg
 
 TARGET   := NXUploader
@@ -21,7 +23,9 @@ INCLUDES := includes
 HTML_SRC := web/index.html
 HTML_GEN := src/html_data.c
 
+ifneq ($(strip $(DEVKITPRO)),)
 include $(DEVKITPRO)/libnx/switch_rules
+endif
 
 export NROFLAGS += --icon=$(APP_ICON)
 export NROFLAGS += --nacp=$(TOPDIR)/$(TARGET).nacp
@@ -67,9 +71,14 @@ export INCLUDE := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-.PHONY: $(BUILD) clean all
+.PHONY: $(BUILD) clean all test
 
 all: $(HTML_GEN) $(BUILD)
+
+# Host-side unit tests (see tests/Makefile). These use the system compiler,
+# so they run even without the devkit environment set up.
+test:
+	@$(MAKE) --no-print-directory -C tests
 
 $(HTML_GEN): $(HTML_SRC)
 	@echo generating $@
@@ -85,6 +94,7 @@ $(BUILD): $(HTML_GEN)
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(TARGET).nro $(TARGET).elf $(TARGET).nacp $(TARGET).nso $(HTML_GEN)
+	@$(MAKE) --no-print-directory -C tests clean
 
 else
 .PHONY: all

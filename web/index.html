@@ -286,6 +286,12 @@ button:disabled{
   text-overflow:ellipsis;
   white-space:nowrap;
 }
+.fm-free{
+  color:var(--muted);
+  font-size:11.5px;
+  white-space:nowrap;
+  flex:0 0 auto;
+}
 .fm-table-wrap{
   max-height:420px;
   overflow:auto;
@@ -344,52 +350,62 @@ button:disabled{
 }
 .fm-status{ padding:10px 0 0; min-height:18px; }
 .fm-status.error{ color:#ff6571; }
+/* Row action buttons. All three share one fixed-size box so the glyph inside
+   can never change a button's width. The pencil in particular gets picked up
+   by a wide emoji font on some systems, which made that button look bigger. */
+.fm-dl,
+.fm-ren,
 .fm-del{
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 4px 9px;
-  width: auto;
-  border: 1px solid #3a2028;
-  border-radius: 6px;
-  background: #1e1419;
-  color: #ff8592;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s;
-}
-.fm-row:hover .fm-del{ opacity: 1; }
-.fm-del:hover{ background: #2a1a20; color: #ffb0b8; filter: none; }
-@media (hover: none){
-  .fm-del{ opacity: 1; }
-}
-.fm-act-col{ width: 52px; }
-.fm-new{
-  flex: 0 0 auto;
-}
-.fm-dl{
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 24px;
   margin: 0 4px 0 0;
-  padding: 4px 8px;
-  border: 1px solid #1e2a3a;
+  padding: 0;
+  border: 1px solid #293342;
   border-radius: 6px;
   background: #141a24;
-  color: #7ab8ff;
-  font-size: 11px;
+  color: #9fb0c4;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+  font-variant-emoji: text;
   text-decoration: none;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .12s;
-  vertical-align: middle;
+  transition: opacity .12s, background .12s, color .12s;
 }
-.fm-row:hover .fm-dl{ opacity: 1; }
+.fm-row:hover .fm-dl,
+.fm-row:hover .fm-ren,
+.fm-row:hover .fm-del{ opacity: 1; }
+.fm-dl{ border-color:#1e2a3a; background:#141a24; color:#7ab8ff; }
+.fm-ren{ border-color:#2a2a3a; background:#16161f; color:#cfd6ff; }
+.fm-del{ border-color:#3a2028; background:#1e1419; color:#ff8592; }
 .fm-dl:hover{ background: #1a2333; color: #a8ceff; }
+.fm-ren:hover{ background: #1c1c2a; color: #e6ebff; }
+.fm-del:hover{ background: #2a1a20; color: #ffb0b8; }
 @media (hover: none){
-  .fm-dl{ opacity: 1; }
+  .fm-dl, .fm-ren, .fm-del{ opacity: 1; }
 }
-.fm-act-col{ width: 86px; }   /* was 52px */
+.fm-new{
+  flex: 0 0 auto;
+}
+.fm-act-col{ width: 124px; }
+.drop-alt{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:10px;
+  font-size:12.5px;
+  color:var(--muted);
+}
+.drop-alt .link{ color:#7ab8ff; cursor:pointer; text-decoration:underline; }
+.drop-alt .link:hover{ color:#a8ceff; }
+.drop-opt{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
 </style>
 </head>
 
@@ -414,6 +430,7 @@ button:disabled{
     <button id="fmRefresh" class="fm-btn" type="button" title="Refresh">&#8635;</button>
     <button id="fmNewFolder" class="fm-btn" type="button" title="New folder">New Folder</button>
     <div class="fm-path" id="fmPath">sdmc:/</div>
+    <span class="fm-free" id="fmFree"></span>
   </div>
 
   <div class="fm-table-wrap">
@@ -439,6 +456,12 @@ button:disabled{
       <div class="drop-hint" id="dropHint">to sdmc:/</div>
       <input id="file" name="file" type="file" multiple>
     </label>
+
+    <div class="drop-alt">
+      <span id="pickFolder" class="link">or upload a whole folder</span>
+      <label class="drop-opt"><input type="checkbox" id="toSwitch"> upload to sdmc:/switch instead</label>
+    </div>
+    <input id="folder" type="file" webkitdirectory directory multiple hidden>
 
     <div class="file-info" id="fileInfo">
       <div class="file-name" id="fileName"></div>
@@ -475,6 +498,7 @@ NX Uploader
 
 <script>
 let xhr = null;
+let pickedFiles = null;
 const form=document.getElementById('uploadForm');
 const fileInput=document.getElementById('file');
 const drop=document.getElementById('drop');
@@ -489,6 +513,9 @@ const status=document.getElementById('status');
 const progressLabel=document.getElementById('progressLabel');
 const cancel=document.getElementById('cancel');
 const fmNewFolder = document.getElementById('fmNewFolder');
+const folderInput = document.getElementById('folder');
+const pickFolder  = document.getElementById('pickFolder');
+const toSwitch    = document.getElementById('toSwitch');
 cancel.style.display='none';
 cancel.onclick = function(){
   if (xhr) xhr.abort();
@@ -519,8 +546,30 @@ function selectFiles(files){
 }
 
 fileInput.addEventListener('change', function(){
-  selectFiles(this.files);
+  setPicked(this.files);
 });
+
+// Folder upload: the same input flow, but the file list comes from a
+// directory picker (or a dropped folder) and each File carries a
+// webkitRelativePath the server turns into subdirectories.
+pickFolder.onclick = function(){ folderInput.click(); };
+folderInput.addEventListener('change', function(){
+  setPicked(this.files);
+});
+
+function setPicked(files){
+  if (!files || !files.length) return;
+  pickedFiles = files;
+  selectFiles(files);
+}
+
+// Upload destination: the browsed folder, or sdmc:/switch when the install
+// box is ticked.
+function currentDestDir(){ return toSwitch.checked ? 'switch' : fm.cwd; }
+function updateDropHint(){
+  document.getElementById('dropHint').textContent = 'to sdmc:/' + currentDestDir();
+}
+toSwitch.addEventListener('change', updateDropHint);
 
 drop.addEventListener('dragover',function(e){
   e.preventDefault();
@@ -535,8 +584,7 @@ drop.addEventListener('drop',function(e){
   e.preventDefault();
   drop.classList.remove('drag');
   if (e.dataTransfer.files.length){
-    fileInput.files = e.dataTransfer.files;
-    selectFiles(e.dataTransfer.files);   // was selectFile(e.dataTransfer.files[0])
+    setPicked(e.dataTransfer.files);
   }
 });
 
@@ -572,11 +620,48 @@ fmNewFolder.onclick = async function(){
     }
 };
 
-form.addEventListener('submit', function(e){
+form.addEventListener('submit', async function(e){
   e.preventDefault();
 
-  const files = fileInput.files;
+  const files = (pickedFiles && pickedFiles.length) ? pickedFiles : fileInput.files;
   if (!files.length) return;
+
+  const destDir = currentDestDir();
+  const isFolder = Array.from(files).some(f => f.webkitRelativePath);
+
+  // If any selected file already exists in the destination folder, confirm
+  // before overwriting. A fresh listing is fetched so the check does not
+  // rely on a stale view; if the fetch fails we just upload anyway. Folder
+  // uploads skip this, since the listing only holds bare names.
+  let names = null;
+  if (!isFolder) try {
+    const res = await fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: 'LIST ' + destDir,
+    });
+    if (res.ok){
+      names = new Set();
+      for (const line of (await res.text()).split('\n')){
+        const p = line.split('\t');
+        if (p[1]) names.add(p[1].toLowerCase());
+      }
+    }
+  } catch (err) { /* proceed without the check */ }
+
+  if (names){
+    const clashes = [];
+    for (const f of files){
+      if (names.has(f.name.toLowerCase())) clashes.push(f.name);
+    }
+    if (clashes.length){
+      const verb = clashes.length === 1 ? 'it' : 'them';
+      if (!confirm(clashes.length + ' file(s) already exist in this folder:\n\n' +
+                   clashes.join('\n') + '\n\nOverwrite ' + verb + '?')){
+        return;
+      }
+    }
+  }
 
   const count = files.length;
   const label = count === 1 ? files[0].name : (count + ' files');
@@ -592,7 +677,7 @@ form.addEventListener('submit', function(e){
   xhr = new XMLHttpRequest();
   cancel.style.display='block';
   const data=new FormData();
-  for (const f of fileInput.files) data.append('file', f);
+  for (const f of files) data.append('file', f, f.webkitRelativePath || f.name);
 
   xhr.upload.addEventListener('progress',function(e){
     if(e.lengthComputable){
@@ -640,7 +725,7 @@ form.addEventListener('submit', function(e){
   });
 
   xhr.open('POST',window.location.href,true);
-  xhr.setRequestHeader('X-Upload-Dir', fm.cwd);
+  xhr.setRequestHeader('X-Upload-Dir', destDir);
   xhr.send(data);
 });
 
@@ -656,6 +741,26 @@ const fmPath    = document.getElementById('fmPath');
 const fmStatus  = document.getElementById('fmStatus');
 const fmUp      = document.getElementById('fmUp');
 const fmRefresh = document.getElementById('fmRefresh');
+const fmFree    = document.getElementById('fmFree');
+
+async function refreshFree(){
+  try {
+    const res = await fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: 'FREE',
+    });
+    if (!res.ok) return;
+    const parts = (await res.text()).trim().split('\t');
+    const fb = parseInt(parts[0], 10);
+    const tb = parseInt(parts[1], 10);
+    fmFree.textContent = (isFinite(fb) && fb >= 0)
+      ? (formatBytes(fb) + ' free' + ((isFinite(tb) && tb > 0) ? ' / ' + formatBytes(tb) : ''))
+      : '';
+  } catch (e) {
+    /* free space is best effort */
+  }
+}
 
 fmRefresh.onclick = () => fm.load(fm.cwd);
 fmUp.onclick      = () => fm.load(fm.cwd ? fm.cwd.replace(/\/?[^/]+$/, '') : '');
@@ -685,7 +790,7 @@ fm.load = async function(rel) {
     fm.cwd = rel;
     fm.loaded = true;
     fmPath.textContent = 'sdmc:/' + rel;
-    document.getElementById('dropHint').textContent = 'to sdmc:/' + rel;
+    updateDropHint();
     fmUp.disabled = (rel === '');
 
     const rows = text.split('\n').filter(Boolean);
@@ -722,8 +827,9 @@ fm.load = async function(rel) {
         '<td class="fm-size">' + (isDir ? '' : formatBytes(size)) + '</td>' +
         '<td>' +
           (isDir ? '' :
-            '<a class="fm-dl" href="' + dlHref + '" download title="Download">&#11015;</a>') +
-          '<button class="fm-del" type="button" title="Delete">&#10005;</button>' +
+            '<a class="fm-dl" href="' + dlHref + '" download title="Download">&#11015;&#xFE0E;</a>') +
+          '<button class="fm-ren" type="button" title="Rename or move">&#9998;&#xFE0E;</button>' +
+          '<button class="fm-del" type="button" title="Delete">&#10005;&#xFE0E;</button>' +
         '</td>';
       tr.querySelector('.fm-name span:last-child').textContent = name;
 
@@ -732,6 +838,12 @@ fm.load = async function(rel) {
         // Stop the row's navigate handler from firing.
         dlLink.addEventListener('click', (e) => e.stopPropagation());
       }
+
+      const renBtn = tr.querySelector('.fm-ren');
+      renBtn.onclick = (e) => {
+        e.stopPropagation();
+        fm.rename(name, isDir);
+      };
 
       const delBtn = tr.querySelector('.fm-del');
       delBtn.onclick = (e) => {
@@ -752,6 +864,7 @@ fm.load = async function(rel) {
     fmBody.innerHTML = '<tr><td colspan="3" class="fm-empty">—</td></tr>';
   } finally {
     fm.busy = false;
+    refreshFree();
   }
 };
 fm.delete = async function(name, isDir){
@@ -773,6 +886,35 @@ fm.delete = async function(name, isDir){
         fm.load(fm.cwd);
     } catch (e){
         fmStatus.textContent = 'Delete failed: ' + e.message;
+        fmStatus.className = 'fm-status error';
+    }
+};
+fm.rename = async function(name, isDir){
+    const rel = fm.cwd ? fm.cwd + '/' + name : name;
+    const to = prompt('Rename or move "' + name + '" to:', name);
+    if (to === null) return;
+    const trimmed = to.trim();
+    if (!trimmed || trimmed === name) return;
+
+    // A plain name stays in this folder; anything with a slash is treated as
+    // a path relative to the root, so this doubles as a move.
+    const newRel = (trimmed.indexOf('/') >= 0)
+        ? trimmed
+        : (fm.cwd ? fm.cwd + '/' + trimmed : trimmed);
+
+    try {
+        const res = await fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'REN\t' + rel + '\t' + newRel,
+        });
+        if (!res.ok){
+            const msg = await res.text();
+            throw new Error(msg || ('HTTP ' + res.status));
+        }
+        fm.load(fm.cwd);
+    } catch (e){
+        fmStatus.textContent = 'Rename failed: ' + e.message;
         fmStatus.className = 'fm-status error';
     }
 };

@@ -16,9 +16,8 @@
 // buf_sz is too small for all entries.
 int list_dir(const char *rel, char *buf, size_t buf_sz);
 
-// Deletes the file (or empty directory) at rel, relative to sdmc:/.
-// Returns 0 on success, -1 on error (doesn't exist, escapes root, non-empty dir).
-// This will always refuse to delete the root even if join_and_check allowed it.
+// Recursively deletes the file or directory tree at rel, relative to the
+// configured root. Refuses the root itself. Returns 0 on success, -1 on error.
 int delete_path(const char *rel);
 
 // Creates a directory at rel, relative to sdmc:/.
@@ -29,5 +28,14 @@ int make_dir(const char *rel);
 // full_out receives the resolved absolute path so  the caller can fopen() it.
 // Returns 0 on success, -1 on error (It omits dirs).
 int stat_file(const char *rel, char *full_out, size_t full_sz, long long *out_size);
+
+// Creates rel and any missing parent directories, relative to the configured
+// root. Existing components are left alone. Returns 0 on success, -1 if the
+// path escapes root or a component could not be created.
+int make_dirs(const char *rel);
+
+// Renames or moves from_rel to to_rel, both relative to the configured root,
+// replacing an existing destination file. Returns 0 on success, -1 on error.
+int rename_path(const char *from_rel, const char *to_rel);
 
 #endif /* FILEMAN_H */
