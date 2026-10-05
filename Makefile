@@ -30,6 +30,11 @@ endif
 export NROFLAGS += --icon=$(APP_ICON)
 export NROFLAGS += --nacp=$(TOPDIR)/$(TARGET).nacp
 
+# Link through the compiler driver. devkitPro's rules set CC but not LD, and
+# with no LD make falls back to the host linker, which then chokes on the
+# aarch64 flags.
+LD      := $(CC)
+
 ARCH    := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS  := -g -Wall -O2 -ffunction-sections \
